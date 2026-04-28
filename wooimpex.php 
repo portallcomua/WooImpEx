@@ -1,10 +1,10 @@
 <?php
 /**
- * Plugin Name: WooCommerce Простий Імпорт/Експорт
+ * Plugin Name: WooCommerce Простий Імпорт/Експорт (WooImpex)
  * Description: Інтуїтивний імпорт/експорт товарів, як у JBZoo: мінімум кліків, автоматичний мапінг, зрозумілий UI.
  * Version: 1.0
- * Author: Your Name
- * Text Domain: woo-simple-ie
+ * Author: portallcomua
+ * Text Domain: wooimpex
  * Domain Path: /languages
  * Requires Plugins: woocommerce
  */
@@ -27,6 +27,7 @@ final class WC_Simple_Import_Export {
     private function __construct() {
         add_action('admin_menu', [$this, 'add_admin_menu']);
         add_action('admin_init', [$this, 'handle_export']);
+        add_action('admin_post_wsie_upload_csv', [$this, 'handle_upload_csv']);
         add_action('admin_post_wsie_import_process', [$this, 'handle_import']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_assets']);
     }
@@ -34,26 +35,27 @@ final class WC_Simple_Import_Export {
     public function add_admin_menu() {
         add_submenu_page(
             'edit.php?post_type=product',
-            __('Простий імпорт/експорт', 'woo-simple-ie'),
-            __('Простий імпорт/експорт', 'woo-simple-ie'),
+            __('WooImpex імпорт товарів', 'wooimpex'),
+            __('WooImpex імпорт товарів', 'wooimpex'),
             'manage_woocommerce',
-            'wsie-import-export',
+            'wooimpex-import-export',
             [$this, 'render_admin_page']
         );
     }
 
     public function enqueue_assets($hook) {
-        if ($hook !== 'product_page_wsie-import-export') {
+        if ($hook !== 'product_page_wooimpex-import-export') {
             return;
         }
-        wp_enqueue_style('wsie-admin', false);
-        wp_add_inline_style('wsie-admin', '
-            .wsie-mapping-table { width:100%; border-collapse:collapse; margin:20px 0; }
-            .wsie-mapping-table th, .wsie-mapping-table td { border:1px solid #ddd; padding:8px; text-align:left; }
-            .wsie-mapping-table th { background:#f1f1f1; }
-            .wsie-preview { background:#f9f9f9; padding:10px; margin-bottom:20px; }
-            .wsie-success { color:green; }
-            .wsie-error { color:red; }
+        wp_enqueue_style('wooimpex-admin', false);
+        wp_add_inline_style('wooimpex-admin', '
+            .wooimpex-mapping-table { width:100%; border-collapse:collapse; margin:20px 0; }
+            .wooimpex-mapping-table th, .wooimpex-mapping-table td { border:1px solid #ddd; padding:8px; text-align:left; }
+            .wooimpex-mapping-table th { background:#f1f1f1; }
+            .wooimpex-preview { background:#f9f9f9; padding:10px; margin-bottom:20px; }
+            .wooimpex-success { color:green; }
+            .wooimpex-error { color:red; }
+            .wooimpex-sample-btn { margin-top:20px; }
         ');
     }
 
@@ -61,18 +63,18 @@ final class WC_Simple_Import_Export {
         $tab = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : 'import';
         ?>
         <div class="wrap">
-            <h1><?php _e('Простий імпорт/експорт товарів', 'woo-simple-ie'); ?></h1>
+            <h1><?php _e('WooImpex – простий імпорт/експорт товарів', 'wooimpex'); ?></h1>
             <h2 class="nav-tab-wrapper">
-                <a href="?page=wsie-import-export&tab=import" class="nav-tab <?php echo $tab === 'import' ? 'nav-tab-active' : ''; ?>"><?php _e('Імпорт', 'woo-simple-ie'); ?></a>
-                <a href="?page=wsie-import-export&tab=export" class="nav-tab <?php echo $tab === 'export' ? 'nav-tab-active' : ''; ?>"><?php _e('Експорт', 'woo-simple-ie'); ?></a>
+                <a href="?page=wooimpex-import-export&tab=import" class="nav-tab <?php echo $tab === 'import' ? 'nav-tab-active' : ''; ?>"><?php _e('Імпорт', 'wooimpex'); ?></a>
+                <a href="?page=wooimpex-import-export&tab=export" class="nav-tab <?php echo $tab === 'export' ? 'nav-tab-active' : ''; ?>"><?php _e('Експорт', 'wooimpex'); ?></a>
             </h2>
 
             <?php if ($tab === 'import') : ?>
-                <div class="wsie-import-section">
+                <div class="wooimpex-import-section">
                     <?php $this->render_import_ui(); ?>
                 </div>
             <?php else : ?>
-                <div class="wsie-export-section">
+                <div class="wooimpex-export-section">
                     <?php $this->render_export_ui(); ?>
                 </div>
             <?php endif; ?>
@@ -82,8 +84,13 @@ final class WC_Simple_Import_Export {
 
     private function render_import_ui() {
         $step = isset($_GET['step']) ? (int) $_GET['step'] : 1;
+        $result = get_transient('wooimpex_import_result');
+        if ($result) {
+            echo '<div class="notice notice-success is-dismissible"><p>' . wp_kses_post($result) . '</p></div>';
+            delete_transient('wooimpex_import_result');
+        }
 
-        if ($step === 2 && isset($_SESSION['wsie_csv_data']) && isset($_SESSION['wsie_headers'])) {
+        if ($step === 2 && isset($_SESSION['wooimpex_csv_data']) && isset($_SESSION['wooimpex_headers'])) {
             $this->render_mapping_form();
         } else {
             $this->render_file_upload_form();
@@ -94,26 +101,33 @@ final class WC_Simple_Import_Export {
         ?>
         <form method="post" enctype="multipart/form-data" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
             <input type="hidden" name="action" value="wsie_upload_csv">
-            <?php wp_nonce_field('wsie_upload_csv'); ?>
+            <?php wp_nonce_field('wooimpex_upload_csv'); ?>
             <table class="form-table">
                 <tr>
-                    <th scope="row"><label for="csv_file"><?php _e('CSV файл', 'woo-simple-ie'); ?></label></th>
+                    <th scope="row"><label for="csv_file"><?php _e('CSV файл', 'wooimpex'); ?></label></th>
                     <td><input type="file" name="csv_file" id="csv_file" accept=".csv" required><br>
-                    <span class="description"><?php _e('Перший рядок має містити заголовки колонок. Роздільник – кома, обгортка – подвійні лапки.', 'woo-simple-ie'); ?></span></td>
+                    <span class="description"><?php _e('Перший рядок має містити заголовки колонок. Роздільник – кома, обгортка – подвійні лапки.', 'wooimpex'); ?></span></td>
                 </tr>
                 <tr>
-                    <th scope="row"><label for="delimiter"><?php _e('Роздільник', 'woo-simple-ie'); ?></label></th>
+                    <th scope="row"><label for="delimiter"><?php _e('Роздільник', 'wooimpex'); ?></label></th>
                     <td><input type="text" name="delimiter" id="delimiter" value="," size="1" maxlength="1"></td>
                 </tr>
             </table>
-            <p class="submit"><input type="submit" class="button-primary" value="<?php _e('Завантажити та проаналізувати', 'woo-simple-ie'); ?>"></p>
+            <p class="submit"><input type="submit" class="button-primary" value="<?php _e('Завантажити та проаналізувати', 'wooimpex'); ?>"></p>
         </form>
+        
+        <div class="wooimpex-sample-btn">
+            <a href="<?php echo esc_url(plugins_url('sample-products.csv', __FILE__)); ?>" class="button" download>
+                ⬇️ <?php _e('Завантажити приклад CSV (всі поля)', 'wooimpex'); ?>
+            </a>
+            <span class="description"><?php _e('Файл зразка з усіма можливими колонками для імпорту.', 'wooimpex'); ?></span>
+        </div>
         <?php
     }
 
     private function render_mapping_form() {
-        $headers = $_SESSION['wsie_headers'];
-        $sample = $_SESSION['wsie_csv_data'][0] ?? [];
+        $headers = $_SESSION['wooimpex_headers'];
+        $sample = $_SESSION['wooimpex_csv_data'][0] ?? [];
 
         $product_fields = $this->get_product_fields();
 
@@ -125,17 +139,17 @@ final class WC_Simple_Import_Export {
         }
 
         ?>
-        <h3><?php _e('Крок 2: зіставте колонки з полями товару', 'woo-simple-ie'); ?></h3>
-        <div class="wsie-preview">
-            <strong><?php _e('Зразок даних (перший рядок після заголовків):', 'woo-simple-ie'); ?></strong>
+        <h3><?php _e('Крок 2: зіставте колонки з полями товару', 'wooimpex'); ?></h3>
+        <div class="wooimpex-preview">
+            <strong><?php _e('Зразок даних (перший рядок після заголовків):', 'wooimpex'); ?></strong>
             <pre><?php print_r($sample); ?></pre>
         </div>
         <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
             <input type="hidden" name="action" value="wsie_import_process">
-            <?php wp_nonce_field('wsie_import_process'); ?>
-            <table class="wsie-mapping-table">
+            <?php wp_nonce_field('wooimpex_import_process'); ?>
+            <table class="wooimpex-mapping-table">
                 <thead>
-                    <tr><th><?php _e('Колонка CSV', 'woo-simple-ie'); ?></th><th><?php _e('Приклад значення', 'woo-simple-ie'); ?></th><th><?php _e('Поле товару', 'woo-simple-ie'); ?></th></tr>
+                    <tr><th><?php _e('Колонка CSV', 'wooimpex'); ?></th><th><?php _e('Приклад значення', 'wooimpex'); ?></th><th><?php _e('Поле товару', 'wooimpex'); ?></th></tr>
                 </thead>
                 <tbody>
                     <?php foreach ($headers as $idx => $col): ?>
@@ -144,7 +158,7 @@ final class WC_Simple_Import_Export {
                         <td><?php echo esc_html(substr($sample[$idx] ?? '', 0, 50)); ?></td>
                         <td>
                             <select name="map[<?php echo $idx; ?>]">
-                                <option value="">— <?php _e('Не імпортувати', 'woo-simple-ie'); ?> —</option>
+                                <option value="">— <?php _e('Не імпортувати', 'wooimpex'); ?> —</option>
                                 <?php foreach ($product_fields as $field_key => $field_label): ?>
                                     <option value="<?php echo esc_attr($field_key); ?>" <?php selected($auto_mapping[$idx], $field_key); ?>><?php echo esc_html($field_label); ?></option>
                                 <?php endforeach; ?>
@@ -154,29 +168,29 @@ final class WC_Simple_Import_Export {
                     <?php endforeach; ?>
                 </tbody>
             </table>
-            <p class="submit"><input type="submit" class="button-primary" value="<?php _e('Почати імпорт', 'woo-simple-ie'); ?>"></p>
+            <p class="submit"><input type="submit" class="button-primary" value="<?php _e('Почати імпорт', 'wooimpex'); ?>"></p>
         </form>
         <?php
     }
 
     private function get_product_fields() {
         return [
-            'post_title'             => __('Назва товару', 'woo-simple-ie'),
-            'post_content'           => __('Повний опис', 'woo-simple-ie'),
-            'post_excerpt'           => __('Короткий опис', 'woo-simple-ie'),
-            '_sku'                   => __('Артикул (SKU)', 'woo-simple-ie'),
-            '_regular_price'         => __('Звичайна ціна', 'woo-simple-ie'),
-            '_sale_price'            => __('Акційна ціна', 'woo-simple-ie'),
-            '_stock'                 => __('Кількість на складі', 'woo-simple-ie'),
-            '_stock_status'          => __('Статус складу', 'woo-simple-ie'),
-            '_weight'                => __('Вага', 'woo-simple-ie'),
-            '_length'                => __('Довжина', 'woo-simple-ie'),
-            '_width'                 => __('Ширина', 'woo-simple-ie'),
-            '_height'                => __('Висота', 'woo-simple-ie'),
-            '_manage_stock'          => __('Керувати складом', 'woo-simple-ie'),
-            'product_cat'            => __('Категорії (ID або назви через |)', 'woo-simple-ie'),
-            'product_tag'            => __('Мітки (через |)', 'woo-simple-ie'),
-            'attributes'             => __('Атрибути (формат: назва:значення1,значення2|інша:значення)', 'woo-simple-ie'),
+            'post_title'             => __('Назва товару', 'wooimpex'),
+            'post_content'           => __('Повний опис', 'wooimpex'),
+            'post_excerpt'           => __('Короткий опис', 'wooimpex'),
+            '_sku'                   => __('Артикул (SKU)', 'wooimpex'),
+            '_regular_price'         => __('Звичайна ціна', 'wooimpex'),
+            '_sale_price'            => __('Акційна ціна', 'wooimpex'),
+            '_stock'                 => __('Кількість на складі', 'wooimpex'),
+            '_stock_status'          => __('Статус складу', 'wooimpex'),
+            '_weight'                => __('Вага', 'wooimpex'),
+            '_length'                => __('Довжина', 'wooimpex'),
+            '_width'                 => __('Ширина', 'wooimpex'),
+            '_height'                => __('Висота', 'wooimpex'),
+            '_manage_stock'          => __('Керувати складом', 'wooimpex'),
+            'product_cat'            => __('Категорії (ID або назви через |)', 'wooimpex'),
+            'product_tag'            => __('Мітки (через |)', 'wooimpex'),
+            'attributes'             => __('Атрибути (формат: назва:значення1,значення2|інша:значення)', 'wooimpex'),
         ];
     }
 
@@ -207,7 +221,7 @@ final class WC_Simple_Import_Export {
         if (!current_user_can('manage_woocommerce')) {
             wp_die('Access denied');
         }
-        check_admin_referer('wsie_import_process');
+        check_admin_referer('wooimpex_import_process');
 
         if (empty($_POST['map'])) {
             wp_redirect(add_query_arg(['step' => 1, 'error' => 'no_mapping'], wp_get_referer()));
@@ -215,8 +229,8 @@ final class WC_Simple_Import_Export {
         }
 
         $mapping = array_map('sanitize_text_field', $_POST['map']);
-        $csv_data = $_SESSION['wsie_csv_data'] ?? [];
-        $headers = $_SESSION['wsie_headers'] ?? [];
+        $csv_data = $_SESSION['wooimpex_csv_data'] ?? [];
+        $headers = $_SESSION['wooimpex_headers'] ?? [];
 
         if (empty($csv_data) || empty($headers)) {
             wp_die('Дані CSV не знайдені, спробуйте завантажити файл знову.');
@@ -253,13 +267,13 @@ final class WC_Simple_Import_Export {
         }
 
         // Cleanup session
-        unset($_SESSION['wsie_csv_data'], $_SESSION['wsie_headers']);
+        unset($_SESSION['wooimpex_csv_data'], $_SESSION['wooimpex_headers']);
 
         $message = sprintf("Імпорт завершено. Додано/оновлено: %d товарів.", $imported);
         if (!empty($errors)) {
             $message .= '<br>Помилки:<br>' . implode('<br>', array_slice($errors, 0, 20));
         }
-        set_transient('wsie_import_result', $message, 60);
+        set_transient('wooimpex_import_result', $message, 60);
         wp_redirect(add_query_arg(['step' => 1, 'result' => 1], wp_get_referer()));
         exit;
     }
@@ -402,11 +416,21 @@ final class WC_Simple_Import_Export {
     }
 
     // ---- EXPORT ----
+    public function render_export_ui() {
+        ?>
+        <form method="get" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+            <input type="hidden" name="action" value="wsie_export">
+            <?php wp_nonce_field('wooimpex_export'); ?>
+            <p><?php _e('Натисніть кнопку, щоб експортувати ВСІ прості товари в CSV-файл.', 'wooimpex'); ?></p>
+            <p class="submit"><input type="submit" class="button-primary" value="<?php _e('Експортувати всі товари в CSV', 'wooimpex'); ?>"></p>
+        </form>
+        <?php
+    }
+
     public function handle_export() {
-        if (!isset($_GET['wsie_export']) || !current_user_can('manage_woocommerce')) {
+        if (!isset($_GET['_wpnonce']) || !wp_verify_nonce($_GET['_wpnonce'], 'wooimpex_export') || !current_user_can('manage_woocommerce')) {
             return;
         }
-        check_admin_referer('wsie_export');
 
         $products = wc_get_products(['limit' => -1, 'return' => 'objects']);
         $rows = [];
@@ -435,7 +459,7 @@ final class WC_Simple_Import_Export {
         }
 
         header('Content-Type: text/csv; charset=utf-8');
-        header('Content-Disposition: attachment; filename="woo_export_' . date('Y-m-d') . '.csv"');
+        header('Content-Disposition: attachment; filename="wooimpex_export_' . date('Y-m-d') . '.csv"');
         $output = fopen('php://output', 'w');
         fputcsv($output, $headers);
         foreach ($rows as $row) {
@@ -467,18 +491,18 @@ final class WC_Simple_Import_Export {
                 $terms = wp_get_post_terms($product->get_id(), $attr->get_name(), ['fields' => 'names']);
                 $parts[] = $attr->get_name() . ':' . implode(',', $terms);
             } else {
-                $parts[] = $attr->get_name() . ':' . $attr->get_options();
+                $parts[] = $attr->get_name() . ':' . implode(',', $attr->get_options());
             }
         }
         return implode('|', $parts);
     }
 
-    // ----- CSV Upload processing (AJAX-like via admin_post) -----
+    // ----- CSV Upload processing -----
     public function handle_upload_csv() {
         if (!current_user_can('manage_woocommerce')) {
             wp_die('Access denied');
         }
-        check_admin_referer('wsie_upload_csv');
+        check_admin_referer('wooimpex_upload_csv');
 
         if (empty($_FILES['csv_file']['tmp_name'])) {
             wp_redirect(add_query_arg(['step' => 1, 'error' => 'no_file'], wp_get_referer()));
@@ -512,18 +536,13 @@ final class WC_Simple_Import_Export {
         if (!session_id()) {
             session_start();
         }
-        $_SESSION['wsie_headers'] = $headers;
-        $_SESSION['wsie_csv_data'] = $data;
+        $_SESSION['wooimpex_headers'] = $headers;
+        $_SESSION['wooimpex_csv_data'] = $data;
 
         wp_redirect(add_query_arg(['step' => 2], wp_get_referer()));
         exit;
     }
 }
-
-// Add admin_post hooks
-add_action('admin_post_wsie_upload_csv', ['WC_Simple_Import_Export', 'handle_upload_csv']);
-add_action('admin_post_wsie_import_process', ['WC_Simple_Import_Export', 'handle_import']);
-add_action('admin_post_wsie_export', ['WC_Simple_Import_Export', 'handle_export']);
 
 // Initialize plugin
 WC_Simple_Import_Export::instance();
