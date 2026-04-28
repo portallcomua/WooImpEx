@@ -1,597 +1,330 @@
 <?php
 /**
- * Plugin Name: WooCommerce Простий Імпорт/Експорт (WooImpex)
- * Description: Інтуїтивний імпорт/експорт товарів, як у JBZoo: мінімум кліків, автоматичний мапінг, зрозумілий UI.
- * Version: 1.0
+ * Plugin Name: WooImpex Pro - Імпорт/Експорт WooCommerce
+ * Description: Інтуїтивний імпорт/експорт товарів WooCommerce + ліцензування
+ * Version: 2.1
  * Author: portallcomua
- * Text Domain: wooimpex
- * Domain Path: /languages
  * Requires Plugins: woocommerce
- * GitHub Plugin URI: portallcomua/wooimpex
- * GitHub Branch: main
  */
 
-if (!defined('ABSPATH')) {
-    exit;
+if (!defined('ABSPATH')) exit;
+
+define('WIMPEX_VERSION', '2.1');
+define('WIMPEX_FREE_LIMIT', 25);
+define('WIMPEX_SHOP_URL', 'https://wpquickadd.great-site.net/product/wooimpex-pro/');
+
+// ==================== ФУНКЦІЇ ЛІЦЕНЗІЇ ====================
+function wimpex_get_operations_count() { return get_option('wimpex_total_operations', 0); }
+function wimpex_is_license_active() {
+    $license_valid = get_option('wimpex_license_valid', false);
+    $license_domain = get_option('wimpex_license_domain', '');
+    return $license_valid && $license_domain === $_SERVER['HTTP_HOST'];
 }
+function wimpex_can_perform_operation() {
+    if (wimpex_is_license_active()) return true;
+    return wimpex_get_operations_count() < WIMPEX_FREE_LIMIT;
+}
+function wimpex_get_remaining_free() { return max(0, WIMPEX_FREE_LIMIT - wimpex_get_operations_count()); }
+function wimpex_increment_operations() { update_option('wimpex_total_operations', wimpex_get_operations_count() + 1); }
 
-final class WC_Simple_Import_Export {
-
-    private static $instance = null;
-
-    public static function instance() {
-        if (is_null(self::$instance)) {
-            self::$instance = new self();
+// Обробник активації ліцензії
+add_action('admin_init', function() {
+    if (isset($_POST['wimpex_activate_license']) && isset($_POST['license_key']) && wp_verify_nonce($_POST['wimpex_activate_nonce'], 'wimpex_activate_action')) {
+        $key = trim($_POST['license_key']);
+        if (strlen($key) >= 16) {
+            update_option('wimpex_license_valid', true);
+            update_option('wimpex_license_key', $key);
+            update_option('wimpex_license_domain', $_SERVER['HTTP_HOST']);
+            echo '<div class="notice notice-success"><p>✅ Ліцензію активовано!</p></div>';
+        } else {
+            echo '<div class="notice notice-error"><p>❌ Невірний ключ (мінімум 16 символів)</p></div>';
         }
+    }
+});
+
+// ==================== ОСНОВНИЙ КЛАС ====================
+final class WC_Simple_Import_Export {
+    private static $instance = null;
+    public static function instance() {
+        if (is_null(self::$instance)) self::$instance = new self();
         return self::$instance;
     }
 
     private function __construct() {
         add_action('admin_menu', [$this, 'add_admin_menu']);
-        add_action('admin_init', [$this, 'handle_export']);
+        add_action('admin_post_wsie_export', [$this, 'handle_export']);
         add_action('admin_post_wsie_upload_csv', [$this, 'handle_upload_csv']);
         add_action('admin_post_wsie_import_process', [$this, 'handle_import']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_assets']);
-        
-        // Додаємо фільтр для автоматичних оновлень з GitHub
-        add_filter('pre_set_site_transient_update_plugins', [$this, 'check_for_github_updates']);
     }
 
-    // ==================== АВТОМАТИЧНІ ОНОВЛЕННЯ З GITHUB ====================
-    public function check_for_github_updates($transient) {
-        if (empty($transient->checked)) {
-            return $transient;
-        }
-        
-        $plugin_slug = 'wooimpex/wooimpex.php';
-        $current_version = '1.0';
-        $github_repo = 'portallcomua/wooimpex';
-        
-        $response = wp_remote_get("https://api.github.com/repos/{$github_repo}/releases/latest", [
-            'timeout' => 10,
-            'headers' => ['Accept' => 'application/json']
-        ]);
-        
-        if (is_wp_error($response)) {
-            return $transient;
-        }
-        
-        $release = json_decode(wp_remote_retrieve_body($response));
-        
-        if (isset($release->tag_name)) {
-            $latest_version = ltrim($release->tag_name, 'v');
-            
-            if (version_compare($current_version, $latest_version, '<')) {
-                $update = new stdClass();
-                $update->slug = 'wooimpex';
-                $update->plugin = $plugin_slug;
-                $update->new_version = $latest_version;
-                $update->url = $release->html_url;
-                $update->package = $release->zipball_url;
-                
-                $transient->response[$plugin_slug] = $update;
-            }
-        }
-        
-        return $transient;
-    }
-
-    // ==================== ОСНОВНА ЛОГІКА ПЛАГІНА ====================
-    
     public function add_admin_menu() {
-        add_submenu_page(
-            'edit.php?post_type=product',
-            __('WooImpex імпорт товарів', 'wooimpex'),
-            __('WooImpex імпорт товарів', 'wooimpex'),
-            'manage_woocommerce',
-            'wooimpex-import-export',
-            [$this, 'render_admin_page']
-        );
+        add_submenu_page('edit.php?post_type=product', 'WooImpex Pro', 'WooImpex Pro', 'manage_woocommerce', 'wooimpex-import-export', [$this, 'render_admin_page']);
+        add_submenu_page('edit.php?post_type=product', 'Ліцензія WooImpex', '🔑 Ліцензія WooImpex', 'manage_woocommerce', 'wooimpex-license', [$this, 'render_license_page']);
     }
+
+    public function render_license_page() { ?>
+        <div class="wrap" style="max-width:600px; margin:auto; padding:20px;">
+            <h1>🔑 WooImpex Pro - Ліцензія</h1>
+            <?php if (wimpex_is_license_active()): ?>
+                <div style="background:#d4edda; padding:15px; border-radius:10px;">✅ Активна на: <?php echo get_option('wimpex_license_domain', ''); ?></div>
+            <?php else: ?>
+                <div style="background:#fff3cd; padding:15px; border-radius:10px;">⚠️ Використано: <?php echo wimpex_get_operations_count(); ?> / <?php echo WIMPEX_FREE_LIMIT; ?>. Залишилось: <strong><?php echo wimpex_get_remaining_free(); ?></strong></div>
+                <div style="background:#e8f0fe; padding:20px; border-radius:10px; margin-top:15px;">
+                    <h3>💰 599 грн / $29 USD (вічна ліцензія)</h3>
+                    <p><a href="<?php echo WIMPEX_SHOP_URL; ?>" target="_blank" class="button button-primary">📦 Перейти до оплати</a></p>
+                    <hr>
+                    <form method="post">
+                        <?php wp_nonce_field('wimpex_activate_action', 'wimpex_activate_nonce'); ?>
+                        <input type="text" name="license_key" placeholder="Введіть ліцензійний ключ" style="width:100%; padding:10px;">
+                        <button type="submit" name="wimpex_activate_license" class="button button-primary" style="margin-top:10px;">🔑 Активувати</button>
+                    </form>
+                </div>
+            <?php endif; ?>
+        </div>
+    <?php }
 
     public function enqueue_assets($hook) {
-        if ($hook !== 'product_page_wooimpex-import-export') {
-            return;
-        }
-        wp_enqueue_style('wooimpex-admin', false);
-        wp_add_inline_style('wooimpex-admin', '
-            .wooimpex-mapping-table { width:100%; border-collapse:collapse; margin:20px 0; }
+        if ($hook !== 'product_page_wooimpex-import-export') return;
+        wp_add_inline_style('wp-admin', '
+            .wooimpex-mapping-table { width:100%; border-collapse:collapse; margin:15px 0; }
             .wooimpex-mapping-table th, .wooimpex-mapping-table td { border:1px solid #ddd; padding:8px; text-align:left; }
             .wooimpex-mapping-table th { background:#f1f1f1; }
-            .wooimpex-preview { background:#f9f9f9; padding:10px; margin-bottom:20px; }
-            .wooimpex-success { color:green; }
-            .wooimpex-error { color:red; }
-            .wooimpex-sample-btn { margin-top:20px; }
+            .limit-notice { background:#f8d7da; padding:12px; border-left:4px solid #dc3545; margin-bottom:15px; }
         ');
     }
 
     public function render_admin_page() {
-        $tab = isset($_GET['tab']) ? sanitize_text_field($_GET['tab']) : 'import';
+        $tab = isset($_GET['tab']) ? $_GET['tab'] : 'import';
+        $remaining = wimpex_get_remaining_free();
+        $license_active = wimpex_is_license_active();
         ?>
         <div class="wrap">
-            <h1><?php _e('WooImpex – простий імпорт/експорт товарів', 'wooimpex'); ?></h1>
-            <div style="text-align:right; margin-bottom:10px;">
-                <span style="background:#2271b1; color:white; padding:3px 10px; border-radius:20px; font-size:12px;">v1.0</span>
-            </div>
-            <h2 class="nav-tab-wrapper">
-                <a href="?page=wooimpex-import-export&tab=import" class="nav-tab <?php echo $tab === 'import' ? 'nav-tab-active' : ''; ?>"><?php _e('Імпорт', 'wooimpex'); ?></a>
-                <a href="?page=wooimpex-import-export&tab=export" class="nav-tab <?php echo $tab === 'export' ? 'nav-tab-active' : ''; ?>"><?php _e('Експорт', 'wooimpex'); ?></a>
-            </h2>
-
-            <?php if ($tab === 'import') : ?>
-                <div class="wooimpex-import-section">
-                    <?php $this->render_import_ui(); ?>
-                </div>
-            <?php else : ?>
-                <div class="wooimpex-export-section">
-                    <?php $this->render_export_ui(); ?>
-                </div>
+            <div style="display:flex; justify-content:space-between;"><h1>📦 WooImpex Pro (v<?php echo WIMPEX_VERSION; ?>)</h1><span style="background:#2271b1; color:#fff; padding:4px 12px; border-radius:20px;"><?php echo $license_active ? 'PRO' : 'FREE'; ?></span></div>
+            <?php if (!$license_active && $remaining <= 0): ?>
+                <div class="limit-notice">🚫 Ліміт вичерпано! <a href="<?php echo admin_url('admin.php?page=wooimpex-license'); ?>">Придбайте ліцензію →</a></div>
+            <?php elseif (!$license_active && $remaining > 0): ?>
+                <div class="limit-notice">⚠️ Безкоштовна версія: залишилось <strong><?php echo $remaining; ?></strong> / <?php echo WIMPEX_FREE_LIMIT; ?> операцій.</div>
             <?php endif; ?>
+            <div style="text-align:right;"><a href="<?php echo admin_url('admin.php?page=wooimpex-license'); ?>" class="button">🔑 Ліцензія</a></div>
+            <h2 class="nav-tab-wrapper">
+                <a href="?page=wooimpex-import-export&tab=import" class="nav-tab <?php echo $tab === 'import' ? 'nav-tab-active' : ''; ?>">📥 Імпорт CSV</a>
+                <a href="?page=wooimpex-import-export&tab=export" class="nav-tab <?php echo $tab === 'export' ? 'nav-tab-active' : ''; ?>">📤 Експорт CSV</a>
+            </h2>
+            <?php $tab === 'import' ? $this->render_import_ui() : $this->render_export_ui(); ?>
         </div>
-        <?php
-    }
+    <?php }
 
     private function render_import_ui() {
-        $step = isset($_GET['step']) ? (int) $_GET['step'] : 1;
+        $step = isset($_GET['step']) ? (int)$_GET['step'] : 1;
         $result = get_transient('wooimpex_import_result');
-        if ($result) {
-            echo '<div class="notice notice-success is-dismissible"><p>' . wp_kses_post($result) . '</p></div>';
-            delete_transient('wooimpex_import_result');
-        }
-
-        if ($step === 2 && isset($_SESSION['wooimpex_csv_data']) && isset($_SESSION['wooimpex_headers'])) {
-            $this->render_mapping_form();
-        } else {
-            $this->render_file_upload_form();
-        }
+        if ($result) { echo '<div class="notice notice-success"><p>' . $result . '</p></div>'; delete_transient('wooimpex_import_result'); }
+        if ($step === 2 && isset($_SESSION['wooimpex_csv_data'])) $this->render_mapping_form();
+        else $this->render_file_upload_form();
     }
 
-    private function render_file_upload_form() {
-        ?>
-        <form method="post" enctype="multipart/form-data" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-            <input type="hidden" name="action" value="wsie_upload_csv">
-            <?php wp_nonce_field('wooimpex_upload_csv'); ?>
-            <table class="form-table">
-                <tr>
-                    <th scope="row"><label for="csv_file"><?php _e('CSV файл', 'wooimpex'); ?></label></th>
-                    <td><input type="file" name="csv_file" id="csv_file" accept=".csv" required><br>
-                    <span class="description"><?php _e('Перший рядок має містити заголовки колонок. Роздільник – кома, обгортка – подвійні лапки.', 'wooimpex'); ?></span></td>
-                </tr>
-                <tr>
-                    <th scope="row"><label for="delimiter"><?php _e('Роздільник', 'wooimpex'); ?></label></th>
-                    <td><input type="text" name="delimiter" id="delimiter" value="," size="1" maxlength="1"></td>
-                </tr>
-            </table>
-            <p class="submit"><input type="submit" class="button-primary" value="<?php _e('Завантажити та проаналізувати', 'wooimpex'); ?>"></p>
+    private function render_file_upload_form() { ?>
+        <form method="post" enctype="multipart/form-data" action="<?php echo admin_url('admin-post.php'); ?>">
+            <input type="hidden" name="action" value="wsie_upload_csv"> <?php wp_nonce_field('wooimpex_upload_csv'); ?>
+            <table class="form-table"><tr><th><label>📁 CSV файл</label></th><td><input type="file" name="csv_file" accept=".csv" required><p class="description">Перший рядок - заголовки. Роздільник: кома.</p></td></tr>
+            <tr><th><label>🔧 Роздільник</label></th><td><input type="text" name="delimiter" value="," size="1" maxlength="1"></td></tr></table>
+            <p class="submit"><input type="submit" class="button-primary" value="📤 Завантажити та проаналізувати"></p>
         </form>
-        
-        <div class="wooimpex-sample-btn">
-            <a href="<?php echo esc_url(plugins_url('sample-products.csv', __FILE__)); ?>" class="button" download>
-                ⬇️ <?php _e('Завантажити приклад CSV (всі поля)', 'wooimpex'); ?>
-            </a>
-            <span class="description"><?php _e('Файл зразка з усіма можливими колонками для імпорту.', 'wooimpex'); ?></span>
-        </div>
-        <?php
-    }
+        <div><a href="<?php echo plugin_dir_url(__FILE__) . 'sample-products.csv'; ?>" class="button" download>⬇️ Завантажити приклад CSV (всі поля)</a></div>
+    <?php }
 
     private function render_mapping_form() {
         $headers = $_SESSION['wooimpex_headers'];
         $sample = $_SESSION['wooimpex_csv_data'][0] ?? [];
-
-        $product_fields = $this->get_product_fields();
-
-        // Automatic mapping: match column names to fields
-        $auto_mapping = [];
-        foreach ($headers as $index => $col) {
-            $matched = $this->auto_match_field($col, $product_fields);
-            $auto_mapping[$index] = $matched;
-        }
-
+        $fields = $this->get_product_fields();
         ?>
-        <h3><?php _e('Крок 2: зіставте колонки з полями товару', 'wooimpex'); ?></h3>
-        <div class="wooimpex-preview">
-            <strong><?php _e('Зразок даних (перший рядок після заголовків):', 'wooimpex'); ?></strong>
-            <pre><?php print_r($sample); ?></pre>
-        </div>
-        <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-            <input type="hidden" name="action" value="wsie_import_process">
-            <?php wp_nonce_field('wooimpex_import_process'); ?>
-            <table class="wooimpex-mapping-table">
-                <thead>
-                    <tr><th><?php _e('Колонка CSV', 'wooimpex'); ?></th><th><?php _e('Приклад значення', 'wooimpex'); ?></th><th><?php _e('Поле товару', 'wooimpex'); ?></th></tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($headers as $idx => $col): ?>
-                    <tr>
-                        <td><strong><?php echo esc_html($col); ?></strong></td>
-                        <td><?php echo esc_html(substr($sample[$idx] ?? '', 0, 50)); ?></td>
-                        <td>
-                            <select name="map[<?php echo $idx; ?>]">
-                                <option value="">— <?php _e('Не імпортувати', 'wooimpex'); ?> —</option>
-                                <?php foreach ($product_fields as $field_key => $field_label): ?>
-                                    <option value="<?php echo esc_attr($field_key); ?>" <?php selected($auto_mapping[$idx], $field_key); ?>><?php echo esc_html($field_label); ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </td>
-                    </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-            <p class="submit"><input type="submit" class="button-primary" value="<?php _e('Почати імпорт', 'wooimpex'); ?>"></p>
+        <h3>🧩 Крок 2: зіставте колонки з полями товару</h3>
+        <div class="wooimpex-preview"><strong>📋 Зразок:</strong><pre><?php print_r($sample); ?></pre></div>
+        <form method="post" action="<?php echo admin_url('admin-post.php'); ?>">
+            <input type="hidden" name="action" value="wsie_import_process"> <?php wp_nonce_field('wooimpex_import_process'); ?>
+            <table class="wooimpex-mapping-table"><thead><tr><th>Колонка CSV</th><th>Приклад</th><th>Поле товару</th></tr></thead><tbody>
+            <?php foreach ($headers as $idx => $col): ?>
+            <tr><td><strong><?php echo esc_html($col); ?></strong></td><td><?php echo esc_html(substr($sample[$idx] ?? '', 0, 50)); ?></td>
+            <td><select name="map[<?php echo $idx; ?>]"><option value="">— Не імпортувати —</option>
+            <?php foreach ($fields as $key => $label): ?><option value="<?php echo $key; ?>"><?php echo $label; ?></option><?php endforeach; ?>
+            </select></td></tr>
+            <?php endforeach; ?>
+            </tbody></table>
+            <p class="submit"><input type="submit" class="button-primary" value="🚀 Почати імпорт"></p>
         </form>
-        <?php
-    }
+    <?php }
 
     private function get_product_fields() {
         return [
-            'post_title'             => __('Назва товару', 'wooimpex'),
-            'post_content'           => __('Повний опис', 'wooimpex'),
-            'post_excerpt'           => __('Короткий опис', 'wooimpex'),
-            '_sku'                   => __('Артикул (SKU)', 'wooimpex'),
-            '_regular_price'         => __('Звичайна ціна', 'wooimpex'),
-            '_sale_price'            => __('Акційна ціна', 'wooimpex'),
-            '_stock'                 => __('Кількість на складі', 'wooimpex'),
-            '_stock_status'          => __('Статус складу', 'wooimpex'),
-            '_weight'                => __('Вага', 'wooimpex'),
-            '_length'                => __('Довжина', 'wooimpex'),
-            '_width'                 => __('Ширина', 'wooimpex'),
-            '_height'                => __('Висота', 'wooimpex'),
-            '_manage_stock'          => __('Керувати складом', 'wooimpex'),
-            'product_cat'            => __('Категорії (ID або назви через |)', 'wooimpex'),
-            'product_tag'            => __('Мітки (через |)', 'wooimpex'),
-            'attributes'             => __('Атрибути (формат: назва:значення1,значення2|інша:значення)', 'wooimpex'),
+            'post_title' => 'Назва товару', 'post_content' => 'Повний опис', 'post_excerpt' => 'Короткий опис',
+            '_sku' => 'Артикул (SKU)', '_regular_price' => 'Звичайна ціна', '_sale_price' => 'Акційна ціна',
+            '_stock' => 'Кількість на складі', '_stock_status' => 'Статус складу', '_weight' => 'Вага (кг)',
+            '_length' => 'Довжина (см)', '_width' => 'Ширина (см)', '_height' => 'Висота (см)',
+            'product_cat' => 'Категорії (через |)', 'product_tag' => 'Теги (через |)',
+            'attributes' => 'Атрибути (назва:знач1,знач2|інша:знач)',
         ];
     }
 
-    private function auto_match_field($column, $fields) {
-        $column_clean = strtolower(trim($column));
-        $map = [
-            'name'        => 'post_title', 'назва' => 'post_title', 'title' => 'post_title',
-            'description' => 'post_content', 'опис' => 'post_content',
-            'short_desc'  => 'post_excerpt', 'короткий опис' => 'post_excerpt',
-            'sku'         => '_sku', 'артикул' => '_sku',
-            'price'       => '_regular_price', 'ціна' => '_regular_price', 'regular_price' => '_regular_price',
-            'sale'        => '_sale_price', 'акційна' => '_sale_price',
-            'stock'       => '_stock', 'кількість' => '_stock', 'quantity' => '_stock',
-            'stock_status'=> '_stock_status', 'статус складу' => '_stock_status',
-            'weight'      => '_weight', 'вага' => '_weight',
-            'length'      => '_length', 'довжина' => '_length',
-            'width'       => '_width', 'ширина' => '_width',
-            'height'      => '_height', 'висота' => '_height',
-            'manage_stock'=> '_manage_stock',
-            'categories'  => 'product_cat', 'категорії' => 'product_cat', 'cat' => 'product_cat',
-            'tags'        => 'product_tag', 'мітки' => 'product_tag',
-            'attributes'  => 'attributes', 'атрибути' => 'attributes',
-        ];
-        return $map[$column_clean] ?? '';
+    public function handle_upload_csv() {
+        if (!current_user_can('manage_woocommerce')) wp_die('Access denied');
+        check_admin_referer('wooimpex_upload_csv');
+        if (empty($_FILES['csv_file']['tmp_name'])) wp_redirect(add_query_arg('step', 1, wp_get_referer()));
+        $delimiter = $_POST['delimiter'][0] ?? ',';
+        $handle = fopen($_FILES['csv_file']['tmp_name'], 'r');
+        $headers = fgetcsv($handle, 0, $delimiter);
+        if (!$headers) wp_redirect(add_query_arg('step', 1, wp_get_referer()));
+        $headers = array_map('trim', $headers);
+        $data = [];
+        while (($row = fgetcsv($handle, 0, $delimiter)) !== false) $data[] = $row;
+        fclose($handle);
+        session_start();
+        $_SESSION['wooimpex_headers'] = $headers;
+        $_SESSION['wooimpex_csv_data'] = $data;
+        wp_redirect(add_query_arg('step', 2, wp_get_referer()));
+        exit;
     }
 
     public function handle_import() {
-        if (!current_user_can('manage_woocommerce')) {
-            wp_die('Access denied');
-        }
+        if (!current_user_can('manage_woocommerce')) wp_die('Access denied');
+        if (!wimpex_can_perform_operation()) wp_die('Ліміт вичерпано. <a href="'.admin_url('admin.php?page=wooimpex-license').'">Придбайте ліцензію</a>');
         check_admin_referer('wooimpex_import_process');
-
-        if (empty($_POST['map'])) {
-            wp_redirect(add_query_arg(['step' => 1, 'error' => 'no_mapping'], wp_get_referer()));
-            exit;
-        }
-
+        if (empty($_POST['map'])) wp_redirect(add_query_arg('step', 1, wp_get_referer()));
         $mapping = array_map('sanitize_text_field', $_POST['map']);
         $csv_data = $_SESSION['wooimpex_csv_data'] ?? [];
-        $headers = $_SESSION['wooimpex_headers'] ?? [];
-
-        if (empty($csv_data) || empty($headers)) {
-            wp_die('Дані CSV не знайдені, спробуйте завантажити файл знову.');
-        }
-
+        if (empty($csv_data)) wp_die('CSV дані не знайдено');
         $imported = 0;
-        $errors = [];
-
-        foreach ($csv_data as $row_index => $row) {
-            $product_data = [];
-            foreach ($mapping as $col_idx => $field) {
-                if ($field === '' || !isset($row[$col_idx])) {
-                    continue;
-                }
-                $value = $row[$col_idx];
-                if ($field === 'attributes') {
-                    $product_data['attributes_raw'] = $value;
-                } else {
-                    $product_data[$field] = $value;
+        foreach ($csv_data as $row) {
+            $data = [];
+            foreach ($mapping as $col => $field) {
+                if ($field && isset($row[$col])) {
+                    $value = $row[$col];
+                    if ($field === 'attributes') $data['attributes_raw'] = $value;
+                    else $data[$field] = $value;
                 }
             }
-
-            if (empty($product_data['post_title'])) {
-                $errors[] = "Рядок " . ($row_index+2) . ": пропущено, бо немає назви товару.";
-                continue;
-            }
-
-            $product_id = $this->save_product($product_data);
-            if ($product_id) {
-                $imported++;
-            } else {
-                $errors[] = "Рядок " . ($row_index+2) . ": помилка збереження.";
-            }
+            if (empty($data['post_title'])) continue;
+            if ($this->save_product($data)) $imported++;
         }
-
-        // Cleanup session
+        wimpex_increment_operations();
         unset($_SESSION['wooimpex_csv_data'], $_SESSION['wooimpex_headers']);
-
-        $message = sprintf("Імпорт завершено. Додано/оновлено: %d товарів.", $imported);
-        if (!empty($errors)) {
-            $message .= '<br>Помилки:<br>' . implode('<br>', array_slice($errors, 0, 20));
-        }
-        set_transient('wooimpex_import_result', $message, 60);
-        wp_redirect(add_query_arg(['step' => 1, 'result' => 1], wp_get_referer()));
+        set_transient('wooimpex_import_result', "✅ Імпорт завершено. Додано/оновлено: $imported товарів.", 60);
+        wp_redirect(add_query_arg('step', 1, remove_query_arg('step')));
         exit;
     }
 
     private function save_product($data) {
         $sku = $data['_sku'] ?? '';
         $existing_id = $sku ? wc_get_product_id_by_sku($sku) : 0;
-
-        $product_args = [
-            'post_type'   => 'product',
-            'post_status' => 'publish',
-            'post_title'  => sanitize_text_field($data['post_title']),
-            'post_content'=> sanitize_post_field('post_content', $data['post_content'] ?? '', 0, 'db'),
-            'post_excerpt'=> sanitize_text_field($data['post_excerpt'] ?? ''),
-        ];
-
-        if ($existing_id) {
-            $product_args['ID'] = $existing_id;
-            $product_id = wp_update_post($product_args);
-        } else {
-            $product_id = wp_insert_post($product_args);
-        }
-
-        if (!$product_id) {
-            return false;
-        }
-
-        $product = wc_get_product($product_id);
-
-        // Simple product type
+        $args = ['post_type' => 'product', 'post_status' => 'publish', 'post_title' => sanitize_text_field($data['post_title']), 'post_content' => sanitize_textarea_field($data['post_content'] ?? ''), 'post_excerpt' => sanitize_textarea_field($data['post_excerpt'] ?? '')];
+        if ($existing_id) $args['ID'] = $existing_id;
+        $id = $existing_id ? wp_update_post($args) : wp_insert_post($args);
+        if (!$id) return false;
+        $product = wc_get_product($id);
         $product->set_sku($sku);
-        if (isset($data['_regular_price'])) {
-            $product->set_regular_price(wc_clean($data['_regular_price']));
-        }
-        if (isset($data['_sale_price'])) {
-            $product->set_sale_price(wc_clean($data['_sale_price']));
-        }
-        if (isset($data['_stock'])) {
-            $product->set_stock_quantity(wc_clean($data['_stock']));
-            $product->set_manage_stock(true);
-        }
-        if (isset($data['_stock_status'])) {
-            $product->set_stock_status(wc_clean($data['_stock_status']));
-        }
-        if (isset($data['_weight'])) {
-            $product->set_weight(wc_clean($data['_weight']));
-        }
-        if (isset($data['_length'])) {
-            $product->set_length(wc_clean($data['_length']));
-        }
-        if (isset($data['_width'])) {
-            $product->set_width(wc_clean($data['_width']));
-        }
-        if (isset($data['_height'])) {
-            $product->set_height(wc_clean($data['_height']));
-        }
-
-        // Categories
+        if (isset($data['_regular_price'])) $product->set_regular_price(wc_clean($data['_regular_price']));
+        if (isset($data['_sale_price'])) $product->set_sale_price(wc_clean($data['_sale_price']));
+        if (isset($data['_stock'])) { $product->set_stock_quantity(wc_clean($data['_stock'])); $product->set_manage_stock(true); }
+        if (isset($data['_stock_status'])) $product->set_stock_status(wc_clean($data['_stock_status']));
+        if (isset($data['_weight'])) $product->set_weight(wc_clean($data['_weight']));
+        if (isset($data['_length'])) $product->set_length(wc_clean($data['_length']));
+        if (isset($data['_width'])) $product->set_width(wc_clean($data['_width']));
+        if (isset($data['_height'])) $product->set_height(wc_clean($data['_height']));
         if (!empty($data['product_cat'])) {
-            $cats = explode('|', $data['product_cat']);
             $cat_ids = [];
-            foreach ($cats as $cat) {
-                $term = term_exists($cat, 'product_cat');
-                if (!$term) {
-                    $term = wp_insert_term($cat, 'product_cat');
-                }
-                if (!is_wp_error($term)) {
-                    $cat_ids[] = (int) $term['term_id'];
-                }
-            }
-            wp_set_object_terms($product_id, $cat_ids, 'product_cat');
+            foreach (explode('|', $data['product_cat']) as $cat) { $term = term_exists($cat, 'product_cat'); if (!$term) $term = wp_insert_term($cat, 'product_cat'); if (!is_wp_error($term)) $cat_ids[] = (int)$term['term_id']; }
+            wp_set_object_terms($id, $cat_ids, 'product_cat');
         }
-
-        // Tags
         if (!empty($data['product_tag'])) {
             $tags = explode('|', $data['product_tag']);
-            wp_set_object_terms($product_id, $tags, 'product_tag');
+            wp_set_object_terms($id, $tags, 'product_tag');
         }
-
-        // Attributes
-        if (!empty($data['attributes_raw'])) {
-            $this->save_product_attributes($product_id, $data['attributes_raw']);
-        }
-
+        if (!empty($data['attributes_raw'])) $this->save_attributes($id, $data['attributes_raw']);
         $product->save();
-        return $product_id;
+        return $id;
     }
 
-    private function save_product_attributes($product_id, $raw) {
-        $attributes = [];
-        $pairs = explode('|', $raw);
+    private function save_attributes($pid, $raw) {
+        $attrs = []; $pairs = explode('|', $raw);
         foreach ($pairs as $pair) {
-            $parts = explode(':', $pair, 2);
-            if (count($parts) !== 2) continue;
-            $name = sanitize_text_field($parts[0]);
-            $values = array_map('trim', explode(',', $parts[1]));
-            $attribute_name = wc_sanitize_taxonomy_name($name);
-            $taxonomy_name = 'pa_' . $attribute_name;
-
-            // Register global attribute if not exists
-            if (!taxonomy_exists($taxonomy_name)) {
-                $attribute_id = wc_create_attribute([
-                    'name' => $name,
-                    'slug' => $attribute_name,
-                    'type' => 'select',
-                    'order_by' => 'menu_order',
-                ]);
-                register_taxonomy($taxonomy_name, ['product']);
-            }
-
-            // Add terms
+            $parts = explode(':', $pair, 2); if (count($parts) !== 2) continue;
+            $name = sanitize_text_field($parts[0]); $values = array_map('trim', explode(',', $parts[1]));
+            $slug = wc_sanitize_taxonomy_name($name); $tax = 'pa_' . $slug;
+            if (!taxonomy_exists($tax)) { wc_create_attribute(['name' => $name, 'slug' => $slug, 'type' => 'select']); register_taxonomy($tax, ['product']); }
             $term_ids = [];
-            foreach ($values as $value) {
-                $term = term_exists($value, $taxonomy_name);
-                if (!$term) {
-                    $term = wp_insert_term($value, $taxonomy_name);
-                }
-                if (!is_wp_error($term)) {
-                    $term_ids[] = (int) $term['term_id'];
-                }
-            }
-            wp_set_object_terms($product_id, $term_ids, $taxonomy_name);
-
-            $attributes[] = wc_get_attribute($attribute_name) ? [
-                'name'         => $taxonomy_name,
-                'value'        => implode(', ', $values),
-                'is_visible'   => 1,
-                'is_variation' => 0,
-                'is_taxonomy'  => 1,
-            ] : [
-                'name'         => $name,
-                'value'        => implode(', ', $values),
-                'is_visible'   => 1,
-                'is_variation' => 0,
-                'is_taxonomy'  => 0,
-            ];
+            foreach ($values as $val) { $term = term_exists($val, $tax); if (!$term) $term = wp_insert_term($val, $tax); if (!is_wp_error($term)) $term_ids[] = (int)$term['term_id']; }
+            wp_set_object_terms($pid, $term_ids, $tax);
+            $attrs[] = ['name' => $tax, 'value' => implode(', ', $values), 'is_visible' => 1, 'is_taxonomy' => 1];
         }
-
-        update_post_meta($product_id, '_product_attributes', $attributes);
+        update_post_meta($pid, '_product_attributes', $attrs);
     }
 
-    // ---- EXPORT ----
-    public function render_export_ui() {
-        ?>
-        <form method="get" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-            <input type="hidden" name="action" value="wsie_export">
-            <?php wp_nonce_field('wooimpex_export'); ?>
-            <p><?php _e('Натисніть кнопку, щоб експортувати ВСІ прості товари в CSV-файл.', 'wooimpex'); ?></p>
-            <p class="submit"><input type="submit" class="button-primary" value="<?php _e('Експортувати всі товари в CSV', 'wooimpex'); ?>"></p>
+    // ==================== ЕКСПОРТ (ОНОВЛЕНО) ====================
+    public function render_export_ui() { ?>
+        <form method="get" action="<?php echo admin_url('admin-post.php'); ?>">
+            <input type="hidden" name="action" value="wsie_export"> <?php wp_nonce_field('wooimpex_export'); ?>
+            <p>📤 Експортуйте всі товари в CSV з повним набором полів (ціни, склад, атрибути, категорії, теги).</p>
+            <p class="submit"><input type="submit" class="button-primary" value="📥 Експортувати всі товари в CSV"></p>
         </form>
-        <?php
-    }
+    <?php }
 
     public function handle_export() {
-        if (!isset($_GET['_wpnonce']) || !wp_verify_nonce($_GET['_wpnonce'], 'wooimpex_export') || !current_user_can('manage_woocommerce')) {
-            return;
+        if (!current_user_can('manage_woocommerce')) {
+            wp_die('❌ Доступ заборонено. Потрібні права адміністратора.');
+        }
+        if (!wp_verify_nonce($_GET['_wpnonce'], 'wooimpex_export')) {
+            wp_die('❌ Nonce не підтверджено. Спробуйте ще раз.');
+        }
+        if (!wimpex_can_perform_operation()) {
+            wp_die('🚫 Ліміт безкоштовної версії вичерпано. <a href="'.admin_url('admin.php?page=wooimpex-license').'">Придбайте ліцензію</a>');
         }
 
-        $products = wc_get_products(['limit' => -1, 'return' => 'objects']);
-        $rows = [];
-        $headers = $this->get_export_headers();
-
-        foreach ($products as $product) {
-            $row = [
-                'post_title'      => $product->get_name(),
-                'post_content'    => $product->get_description(),
-                'post_excerpt'    => $product->get_short_description(),
-                '_sku'            => $product->get_sku(),
-                '_regular_price'  => $product->get_regular_price(),
-                '_sale_price'     => $product->get_sale_price(),
-                '_stock'          => $product->get_stock_quantity(),
-                '_stock_status'   => $product->get_stock_status(),
-                '_weight'         => $product->get_weight(),
-                '_length'         => $product->get_length(),
-                '_width'          => $product->get_width(),
-                '_height'         => $product->get_height(),
-                '_manage_stock'   => $product->get_manage_stock() ? 'yes' : 'no',
-                'product_cat'     => $this->get_term_names($product->get_category_ids(), 'product_cat'),
-                'product_tag'     => $this->get_term_names($product->get_tag_ids(), 'product_tag'),
-                'attributes'      => $this->get_attributes_string($product),
-            ];
-            $rows[] = $row;
-        }
-
-        header('Content-Type: text/csv; charset=utf-8');
-        header('Content-Disposition: attachment; filename="wooimpex_export_' . date('Y-m-d') . '.csv"');
-        $output = fopen('php://output', 'w');
-        fputcsv($output, $headers);
-        foreach ($rows as $row) {
-            fputcsv($output, $row);
-        }
-        fclose($output);
-        exit;
-    }
-
-    private function get_export_headers() {
-        return [
+        $products = wc_get_products(['limit' => -1]);
+        $headers = [
             'post_title', 'post_content', 'post_excerpt', '_sku', '_regular_price', '_sale_price',
-            '_stock', '_stock_status', '_weight', '_length', '_width', '_height', '_manage_stock',
+            '_stock', '_stock_status', '_weight', '_length', '_width', '_height',
             'product_cat', 'product_tag', 'attributes'
         ];
-    }
-
-    private function get_term_names($term_ids, $taxonomy) {
-        if (empty($term_ids)) return '';
-        $terms = get_terms(['taxonomy' => $taxonomy, 'include' => $term_ids, 'fields' => 'names']);
-        return implode('|', $terms);
+        
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="wooimpex_export_'.date('Y-m-d_H-i').'.csv"');
+        $out = fopen('php://output', 'w');
+        fputcsv($out, $headers);
+        
+        foreach ($products as $p) {
+            $cats = wp_get_post_terms($p->get_id(), 'product_cat', ['fields' => 'names']);
+            $tags = wp_get_post_terms($p->get_id(), 'product_tag', ['fields' => 'names']);
+            $attr_str = $this->get_attributes_string($p);
+            fputcsv($out, [
+                $p->get_name(),
+                $p->get_description(),
+                $p->get_short_description(),
+                $p->get_sku(),
+                $p->get_regular_price(),
+                $p->get_sale_price(),
+                $p->get_stock_quantity(),
+                $p->get_stock_status(),
+                $p->get_weight(),
+                $p->get_length(),
+                $p->get_width(),
+                $p->get_height(),
+                implode('|', $cats),
+                implode('|', $tags),
+                $attr_str
+            ]);
+        }
+        fclose($out);
+        wimpex_increment_operations();
+        exit;
     }
 
     private function get_attributes_string($product) {
-        $attrs = $product->get_attributes();
         $parts = [];
-        foreach ($attrs as $attr) {
-            if ($attr->is_taxonomy()) {
-                $terms = wp_get_post_terms($product->get_id(), $attr->get_name(), ['fields' => 'names']);
-                $parts[] = $attr->get_name() . ':' . implode(',', $terms);
-            } else {
-                $parts[] = $attr->get_name() . ':' . implode(',', $attr->get_options());
-            }
+        foreach ($product->get_attributes() as $attr) {
+            if ($attr->is_taxonomy()) $vals = wp_get_post_terms($product->get_id(), $attr->get_name(), ['fields' => 'names']);
+            else $vals = $attr->get_options();
+            $parts[] = $attr->get_name() . ':' . implode(',', $vals);
         }
         return implode('|', $parts);
     }
-
-    // ----- CSV Upload processing -----
-    public function handle_upload_csv() {
-        if (!current_user_can('manage_woocommerce')) {
-            wp_die('Access denied');
-        }
-        check_admin_referer('wooimpex_upload_csv');
-
-        if (empty($_FILES['csv_file']['tmp_name'])) {
-            wp_redirect(add_query_arg(['step' => 1, 'error' => 'no_file'], wp_get_referer()));
-            exit;
-        }
-
-        $delimiter = isset($_POST['delimiter']) ? $_POST['delimiter'][0] : ',';
-        $file = $_FILES['csv_file']['tmp_name'];
-
-        $handle = fopen($file, 'r');
-        $headers = fgetcsv($handle, 0, $delimiter);
-        if (!$headers) {
-            fclose($handle);
-            wp_redirect(add_query_arg(['step' => 1, 'error' => 'invalid_csv'], wp_get_referer()));
-            exit;
-        }
-        $headers = array_map('trim', $headers);
-
-        $data = [];
-        while (($row = fgetcsv($handle, 0, $delimiter)) !== false) {
-            $data[] = $row;
-        }
-        fclose($handle);
-
-        if (count($data) === 0) {
-            wp_redirect(add_query_arg(['step' => 1, 'error' => 'empty_data'], wp_get_referer()));
-            exit;
-        }
-
-        // Store in session for next step
-        if (!session_id()) {
-            session_start();
-        }
-        $_SESSION['wooimpex_headers'] = $headers;
-        $_SESSION['wooimpex_csv_data'] = $data;
-
-        wp_redirect(add_query_arg(['step' => 2], wp_get_referer()));
-        exit;
-    }
 }
-
-// Initialize plugin
 WC_Simple_Import_Export::instance();
