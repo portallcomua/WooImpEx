@@ -1,0 +1,4 @@
+post_title,_sku,_regular_price,parent_sku,variation_attributes,variation_price,variation_sku,variation_stock
+"Футболка Adidas",AD-TEE-MAIN,1200,,,,
+,,,"AD-TEE-MAIN","Розмір:S|Колір:червоний",1299,AD-TEE-S-RED,50
+,,,"AD-TEE-MAIN","Розмір:M|Колір:синій",1299,AD-TEE-M-BLUE,45
