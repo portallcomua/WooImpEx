@@ -7,6 +7,8 @@
  * Text Domain: wooimpex
  * Domain Path: /languages
  * Requires Plugins: woocommerce
+ * GitHub Plugin URI: portallcomua/wooimpex
+ * GitHub Branch: main
  */
 
 if (!defined('ABSPATH')) {
@@ -30,8 +32,52 @@ final class WC_Simple_Import_Export {
         add_action('admin_post_wsie_upload_csv', [$this, 'handle_upload_csv']);
         add_action('admin_post_wsie_import_process', [$this, 'handle_import']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_assets']);
+        
+        // Додаємо фільтр для автоматичних оновлень з GitHub
+        add_filter('pre_set_site_transient_update_plugins', [$this, 'check_for_github_updates']);
     }
 
+    // ==================== АВТОМАТИЧНІ ОНОВЛЕННЯ З GITHUB ====================
+    public function check_for_github_updates($transient) {
+        if (empty($transient->checked)) {
+            return $transient;
+        }
+        
+        $plugin_slug = 'wooimpex/wooimpex.php';
+        $current_version = '1.0';
+        $github_repo = 'portallcomua/wooimpex';
+        
+        $response = wp_remote_get("https://api.github.com/repos/{$github_repo}/releases/latest", [
+            'timeout' => 10,
+            'headers' => ['Accept' => 'application/json']
+        ]);
+        
+        if (is_wp_error($response)) {
+            return $transient;
+        }
+        
+        $release = json_decode(wp_remote_retrieve_body($response));
+        
+        if (isset($release->tag_name)) {
+            $latest_version = ltrim($release->tag_name, 'v');
+            
+            if (version_compare($current_version, $latest_version, '<')) {
+                $update = new stdClass();
+                $update->slug = 'wooimpex';
+                $update->plugin = $plugin_slug;
+                $update->new_version = $latest_version;
+                $update->url = $release->html_url;
+                $update->package = $release->zipball_url;
+                
+                $transient->response[$plugin_slug] = $update;
+            }
+        }
+        
+        return $transient;
+    }
+
+    // ==================== ОСНОВНА ЛОГІКА ПЛАГІНА ====================
+    
     public function add_admin_menu() {
         add_submenu_page(
             'edit.php?post_type=product',
@@ -64,6 +110,9 @@ final class WC_Simple_Import_Export {
         ?>
         <div class="wrap">
             <h1><?php _e('WooImpex – простий імпорт/експорт товарів', 'wooimpex'); ?></h1>
+            <div style="text-align:right; margin-bottom:10px;">
+                <span style="background:#2271b1; color:white; padding:3px 10px; border-radius:20px; font-size:12px;">v1.0</span>
+            </div>
             <h2 class="nav-tab-wrapper">
                 <a href="?page=wooimpex-import-export&tab=import" class="nav-tab <?php echo $tab === 'import' ? 'nav-tab-active' : ''; ?>"><?php _e('Імпорт', 'wooimpex'); ?></a>
                 <a href="?page=wooimpex-import-export&tab=export" class="nav-tab <?php echo $tab === 'export' ? 'nav-tab-active' : ''; ?>"><?php _e('Експорт', 'wooimpex'); ?></a>
