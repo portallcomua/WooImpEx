@@ -4,7 +4,7 @@
  * Plugin URI: https://uaserver.pp.ua/
  * Description: Імпорт товарів з CSV для WooCommerce. Підтримка простих та варіативних товарів, зображень, атрибутів.
  * Version: 2.0.1
- * Author: portallcomua
+ * Author: UAServer
  * Author URI: https://uaserver.pp.ua/
  * Text Domain: wooimpex
  * Domain Path: /languages
@@ -41,6 +41,7 @@ class WooImpexPro {
     
     /**
      * Визначення всіх полів WooCommerce
+     * Клієнт повинен використовувати ТОЧНО ТАКІ НАЗВИ колонок у CSV
      */
     private function init_woo_fields() {
         $this->woo_fields = [
@@ -129,6 +130,30 @@ class WooImpexPro {
     }
     
     /**
+     * Автоматичне зіставлення колонок (ТІЛЬКИ за точним збігом)
+     * Клієнт повинен використовувати назви колонок ТОЧНО як у прикладі
+     */
+    private function auto_match_columns($csv_headers) {
+        $matches = [];
+        
+        foreach ($csv_headers as $header) {
+            $found = false;
+            foreach ($this->woo_fields as $field_key => $field_info) {
+                if ($header === $field_info['label']) {
+                    $matches[$header] = $field_key;
+                    $found = true;
+                    break;
+                }
+            }
+            if (!$found) {
+                $matches[$header] = '';
+            }
+        }
+        
+        return $matches;
+    }
+    
+    /**
      * Додавання сторінки в адмінку
      */
     public function add_admin_menu() {
@@ -171,63 +196,6 @@ class WooImpexPro {
     }
     
     /**
-     * Автоматичне зіставлення колонок
-     */
-    private function auto_match_columns($csv_headers) {
-        $matches = [];
-        
-        $synonyms = [
-            'post_title' => ['назва', 'назва товару', 'товар', 'заголовок', 'name', 'product name'],
-            'post_content' => ['опис', 'повний опис', 'детальний опис', 'description', 'content'],
-            'post_excerpt' => ['короткий опис', 'анонс', 'excerpt', 'short description'],
-            '_sku' => ['артикул', 'sku', 'код', 'article', 'product code'],
-            'regular_price' => ['ціна', 'звичайна ціна', 'price', 'regular price'],
-            'sale_price' => ['акційна ціна', 'знижка', 'sale price', 'special price'],
-            'stock' => ['кількість', 'stock', 'quantity', 'залишок'],
-            'stock_status' => ['статус складу', 'наявність', 'stock status', 'availability'],
-            'weight' => ['вага', 'weight', 'маса'],
-            'length' => ['довжина', 'length'],
-            'width' => ['ширина', 'width'],
-            'height' => ['висота', 'height'],
-            'product_cat' => ['категорії', 'категорія', 'category', 'categories', 'cat'],
-            'product_tag' => ['теги', 'тег', 'мітки', 'tags', 'tag'],
-            'image' => ['зображення', 'фото', 'картинка', 'image', 'photo', 'picture'],
-            'gallery' => ['галерея', 'додаткові фото', 'gallery', 'images']
-        ];
-        
-        foreach ($csv_headers as $header) {
-            $clean_header = trim(mb_strtolower($header, 'UTF-8'));
-            $matched = false;
-            
-            foreach ($this->woo_fields as $field_key => $field_info) {
-                if (mb_strtolower($header, 'UTF-8') === mb_strtolower($field_info['label'], 'UTF-8')) {
-                    $matches[$header] = $field_key;
-                    $matched = true;
-                    break;
-                }
-            }
-            
-            if (!$matched) {
-                foreach ($synonyms as $field_key => $synonym_list) {
-                    foreach ($synonym_list as $synonym) {
-                        if (strpos($clean_header, $synonym) !== false) {
-                            $matches[$header] = $field_key;
-                            $matched = true;
-                            break 2;
-                        }
-                    }
-                }
-            }
-            
-            if (!$matched) {
-                $matches[$header] = '';
-            }
-        }
-        
-        return $matches;
-    }
-    
-    /**
      * Рендер сторінки імпорту
      */
     public function render_admin_page() {
@@ -244,6 +212,15 @@ class WooImpexPro {
                     <p>✅ Успішно імпортовано <?php echo intval($_GET['imported']); ?> товарів!</p>
                 </div>
             <?php endif; ?>
+            
+            <div class="card">
+                <h3>📋 Правильні назви колонок у CSV файлі</h3>
+                <p>Ваш CSV файл <strong>ПОВИНЕН</strong> мати саме такі назви колонок:</p>
+                <code style="display: block; background: #f1f1f1; padding: 10px; margin: 10px 0; white-space: pre-wrap;">
+Назва товару, Повний опис, Короткий опис, Артикул (SKU), Ціна, Акційна ціна, Кількість, Статус складу, Вага (кг), Довжина (см), Ширина (см), Висота (см), Категорії (через /), Теги (через ,), Зображення (URL), Галерея (URL через |)
+                </code>
+                <p><strong>⚠️ Важливо:</strong> назви колонок мають бути <strong>точно такими</strong> як у прикладі, включаючи пробіли та розділові знаки.</p>
+            </div>
             
             <?php if (!$csv_data): ?>
                 <div class="card">
@@ -269,14 +246,14 @@ class WooImpexPro {
                     <h3>📄 Приклади CSV файлів</h3>
                     <p>У папці плагіна ви знайдете файли-приклади:</p>
                     <ul>
-                        <li><code>sample-products.csv</code> — звичайний товар</li>
-                        <li><code>sample-variable.csv</code> — варіативний товар</li>
+                        <li><code>sample-products.csv</code> — приклад простого товару з усіма полями</li>
+                        <li><code>sample-variable.csv</code> — приклад варіативного товару</li>
                     </ul>
                 </div>
             <?php else: ?>
                 <div class="card">
                     <h2>🔧 Крок 2: Зіставте колонки CSV з полями товару</h2>
-                    <p>✅ Плагін автоматично підібрав відповідності. Ви можете змінити їх вручну.</p>
+                    <p>✅ Плагін автоматично підібрав відповідності за назвами колонок. Перевірте та натисніть "Почати імпорт".</p>
                     
                     <form method="post" action="<?php echo admin_url('admin-post.php'); ?>">
                         <input type="hidden" name="action" value="wooimpex_import">
@@ -311,7 +288,7 @@ class WooImpexPro {
                                                     </option>
                                                 <?php endforeach; ?>
                                             </select>
-                                        <td>
+                                        </td>
                                         <td style="color: #666; font-size: 12px;">
                                             <?php echo $sample_value; ?>
                                         </td>
