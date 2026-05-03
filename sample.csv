@@ -1,4 +1,6 @@
-post_title,_sku,_regular_price,parent_sku,variation_attributes,variation_price,variation_sku,variation_stock
-"Футболка Adidas",AD-TEE-MAIN,1200,,,,
-,,,"AD-TEE-MAIN","Розмір:S|Колір:червоний",1299,AD-TEE-S-RED,50
-,,,"AD-TEE-MAIN","Розмір:M|Колір:синій",1299,AD-TEE-M-BLUE,45
+Назва товару;Артикул (SKU);Ціна;Акційна ціна;Кількість;Категорії (через /);Теги (через ,)
+Навушники JBL Tune 510BT;JBL-510BT;1299;;50;Електроніка/Аудіо/Навушники;бездротові,jbl
+Мишка Logitech MX Master 3S;LOG-MX3S;3899;3499;25;Електроніка/Комп'ютери/Мишки;логітек,ергономічна
+Клавіатура Keychron K2 Pro;K2-PRO;4299;;10;Електроніка/Комп'ютери/Клавіатури;механічна,keychron
+Монітор Samsung Odyssey G5;SAM-G5;8999;7999;15;Електроніка/Монітори/Ігрові;2k,samsung
+Ноутбук ASUS TUF Gaming;ASUS-TUF;24999;;8;Електроніка/Ноутбуки/Ігрові;asus,gaming
