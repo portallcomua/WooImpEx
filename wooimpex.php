@@ -150,23 +150,86 @@ class WooImpexPro {
             return;
         }
         wp_add_inline_style('wp-admin', '
-            .wooimpex-mapping-table { width: 100%; border-collapse: collapse; }
-            .wooimpex-mapping-table th, .wooimpex-mapping-table td { 
+            .wooimpex-wrap { margin: 20px 20px 0 0; }
+            .wooimpex-card { 
+                background: #fff; 
+                border: 1px solid #ccd0d4; 
+                border-radius: 4px; 
+                padding: 20px; 
+                margin-bottom: 20px; 
+                box-shadow: 0 1px 1px rgba(0,0,0,.04);
+            }
+            .wooimpex-card h2 { 
+                margin-top: 0; 
+                padding-bottom: 10px;
+                border-bottom: 1px solid #eee;
+            }
+            .wooimpex-card h3 {
+                margin-top: 0;
+                color: #23282d;
+            }
+            .wooimpex-mapping-table { 
+                width: 100%; 
+                border-collapse: collapse; 
+                background: #fff;
+                margin: 15px 0;
+            }
+            .wooimpex-mapping-table th, 
+            .wooimpex-mapping-table td { 
                 padding: 12px; 
-                border: 1px solid #ddd; 
+                border: 1px solid #e5e5e5; 
                 text-align: left; 
                 vertical-align: top;
             }
-            .wooimpex-mapping-table th { background: #f1f1f1; }
-            .wooimpex-preview { 
-                background: #f9f9f9; 
-                padding: 10px; 
-                margin-top: 20px;
-                max-height: 300px;
-                overflow: auto;
+            .wooimpex-mapping-table th { 
+                background: #f1f1f1; 
+                font-weight: 600;
             }
-            .wooimpex-success { color: #46b450; }
-            .wooimpex-error { color: #dc3232; }
+            .wooimpex-mapping-table tr:hover td {
+                background: #f9f9f9;
+            }
+            .wooimpex-preview { 
+                background: #fff; 
+                border: 1px solid #ccd0d4;
+                border-radius: 4px;
+                padding: 15px; 
+                margin-top: 20px;
+                overflow: auto;
+                max-height: 400px;
+            }
+            .wooimpex-preview table {
+                margin: 0;
+                width: 100%;
+            }
+            .wooimpex-success { 
+                color: #46b450; 
+                font-weight: bold;
+            }
+            .wooimpex-error { 
+                color: #dc3232; 
+            }
+            .wooimpex-badge {
+                background: #0073aa;
+                color: #fff;
+                padding: 3px 8px;
+                border-radius: 3px;
+                font-size: 10px;
+                margin-left: 8px;
+            }
+            .wooimpex-button-group {
+                margin-top: 20px;
+                display: flex;
+                gap: 10px;
+                align-items: center;
+            }
+            .wooimpex-code {
+                background: #f1f1f1;
+                padding: 10px;
+                border-left: 4px solid #0073aa;
+                font-family: monospace;
+                overflow-x: auto;
+                font-size: 12px;
+            }
         ');
     }
     
@@ -194,6 +257,22 @@ class WooImpexPro {
     }
     
     /**
+     * Отримання URL для скачування прикладів
+     */
+    private function get_sample_url($filename) {
+        $plugin_dir = plugin_dir_url(__FILE__);
+        $sample_path = $plugin_dir . $filename;
+        
+        // Якщо файл існує в папці плагіна
+        if (file_exists(plugin_dir_path(__FILE__) . $filename)) {
+            return $sample_path;
+        }
+        
+        // Якщо файлу немає, створюємо inline-версію
+        return '#';
+    }
+    
+    /**
      * Рендер сторінки імпорту
      */
     public function render_admin_page() {
@@ -202,47 +281,97 @@ class WooImpexPro {
         $auto_matches = $csv_headers ? $this->auto_match_columns($csv_headers) : [];
         
         ?>
-        <div class="wrap">
-            <h1>WooImpex Pro - Імпорт товарів</h1>
+        <div class="wrap wooimpex-wrap">
+            <h1>🚀 WooImpex Pro - Імпорт товарів</h1>
             
             <?php if (isset($_GET['imported']) && $_GET['imported'] > 0): ?>
-                <div class="notice notice-success">
-                    <p>✅ Успішно імпортовано <?php echo intval($_GET['imported']); ?> товарів!</p>
+                <div class="notice notice-success is-dismissible">
+                    <p>✅ Успішно імпортовано <strong><?php echo intval($_GET['imported']); ?></strong> товарів!</p>
                 </div>
             <?php endif; ?>
             
-            <?php if (!$csv_data): ?>
-                <!-- Форма завантаження CSV -->
-                <div class="card">
+            <?php if (!isset($csv_data) || !$csv_data): ?>
+                <!-- КРОК 1: ЗАВАНТАЖЕННЯ CSV -->
+                <div class="wooimpex-card">
                     <h2>📂 Крок 1: Завантажте CSV файл</h2>
                     <form method="post" enctype="multipart/form-data" action="<?php echo admin_url('admin-post.php'); ?>">
                         <input type="hidden" name="action" value="wooimpex_upload_csv">
                         <?php wp_nonce_field('wooimpex_upload', 'wooimpex_nonce'); ?>
                         
-                        <p>
-                            <input type="file" name="csv_file" accept=".csv" required>
-                        </p>
-                        <p>
-                            <label>
-                                <input type="checkbox" name="update_existing" value="1">
-                                🔄 Оновити існуючі товари (за SKU)
-                            </label>
-                        </p>
-                        <?php submit_button('Завантажити CSV', 'primary', 'upload_csv'); ?>
+                        <table class="form-table">
+                            <tr>
+                                <th scope="row">CSV файл:</th>
+                                <td>
+                                    <input type="file" name="csv_file" accept=".csv" required>
+                                    <p class="description">Виберіть CSV файл з товарами для імпорту</p>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Оновлення товарів:</th>
+                                <td>
+                                    <label>
+                                        <input type="checkbox" name="update_existing" value="1">
+                                        <strong>🔄 Оновити існуючі товари</strong> (за артикулом SKU)
+                                    </label>
+                                    <p class="description">Якщо товар з таким SKU вже існує, він буде оновлений</p>
+                                </td>
+                            </tr>
+                        </table>
+                        
+                        <div class="wooimpex-button-group">
+                            <?php submit_button('📤 Завантажити CSV', 'primary', 'upload_csv', false); ?>
+                        </div>
                     </form>
                 </div>
                 
-                <div class="card">
-                    <h3>📄 Правильні назви колонок у CSV:</h3>
-                    <code style="display: block; background: #f1f1f1; padding: 10px;">
-Назва товару, Повний опис, Короткий опис, Артикул (SKU), Ціна, Акційна ціна, Кількість, Статус складу, Вага (кг), Довжина (см), Ширина (см), Висота (см), Категорії (через /), Теги (через ,), Зображення (URL), Галерея (URL через |)
-                    </code>
+                <!-- ПРИКЛАДИ CSV -->
+                <div class="wooimpex-card">
+                    <h2>📥 Скачати приклади CSV файлів</h2>
+                    <p>Використовуйте ці шаблони для швидкого старту:</p>
+                    
+                    <?php
+                    $samples = [
+                        'sample-products.csv' => '📄 Простий товар (з усіма полями)',
+                        'sample-variable.csv' => '🔄 Варіативний товар (розміри, кольори)'
+                    ];
+                    ?>
+                    
+                    <ul style="margin: 15px 0;">
+                        <?php foreach ($samples as $file => $desc): ?>
+                            <li style="margin: 8px 0;">
+                                <a href="<?php echo esc_url($this->get_sample_url($file)); ?>" class="button button-small" download>
+                                    ⬇️ <?php echo esc_html($desc); ?>
+                                </a>
+                                <code style="margin-left: 10px;"><?php echo esc_html($file); ?></code>
+                            </li>
+                        <?php endforeach; ?>
+                    </ul>
                 </div>
+                
+                <!-- ДОВІДКА -->
+                <div class="wooimpex-card">
+                    <h2>ℹ️ Як підготувати CSV файл</h2>
+                    <p><strong>Правильні назви колонок (вони повинні збігатися точно):</strong></p>
+                    <div class="wooimpex-code">
+                        Назва товару, Повний опис, Короткий опис, Артикул (SKU), Ціна, Акційна ціна, Кількість, Статус складу, Вага (кг), Довжина (см), Ширина (см), Висота (см), Категорії (через /), Теги (через ,), Зображення (URL), Галерея (URL через |)
+                    </div>
+                    <p style="margin-top: 15px;">
+                        <strong>📌 Важливо:</strong>
+                    </p>
+                    <ul>
+                        <li>Роздільник колонок — <strong>кома (,)</strong></li>
+                        <li>Файл має бути в кодуванні <strong>UTF-8</strong></li>
+                        <li>Обов'язкові поля: <strong>Назва товару</strong> та <strong>Ціна</strong></li>
+                        <li>Категорії вкладаються через <strong>слеш (/)</strong>, наприклад: <code>Електроніка/Аудіо/Навушники</code></li>
+                        <li>Кілька тегів або галерея розділяються через <strong>кома</strong> або <strong>вертикальна риска (|)</strong></li>
+                    </ul>
+                </div>
+                
             <?php else: ?>
-                <!-- Форма зіставлення колонок -->
-                <div class="card">
+                <!-- КРОК 2: ЗІСТАВЛЕННЯ КОЛОНОК -->
+                <div class="wooimpex-card">
                     <h2>🔧 Крок 2: Зіставте колонки CSV з полями товару</h2>
-                    <p>✅ Плагін автоматично підібрав відповідності за назвами колонок.</p>
+                    <p>✅ <strong>Плагін автоматично підібрав відповідності</strong> за назвами колонок. Перевірте та натисніть "Почати імпорт".</p>
                     
                     <form method="post" action="<?php echo admin_url('admin-post.php'); ?>">
                         <input type="hidden" name="action" value="wooimpex_import">
@@ -251,9 +380,9 @@ class WooImpexPro {
                         <table class="wooimpex-mapping-table">
                             <thead>
                                 <tr>
-                                    <th width="30%">Колонка CSV</th>
-                                    <th width="40%">Поле WooCommerce</th>
-                                    <th width="30%">Приклад значення</th>
+                                    <th width="30%">📋 Колонка CSV</th>
+                                    <th width="40%">🎯 Поле WooCommerce</th>
+                                    <th width="30%">📝 Приклад значення</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -273,12 +402,12 @@ class WooImpexPro {
                                                     <option value="<?php echo esc_attr($field_key); ?>" 
                                                         <?php selected($selected, $field_key); ?>>
                                                         <?php echo esc_html($field_info['label']); ?>
-                                                        <?php if ($field_info['required']): ?> *<?php endif; ?>
+                                                        <?php if ($field_info['required']): ?> <span class="wooimpex-badge">обов'язкове</span><?php endif; ?>
                                                     </option>
                                                 <?php endforeach; ?>
                                             </select>
                                         </td>
-                                        <td style="color: #666; font-size: 12px;">
+                                        <td style="color: #666; font-size: 13px; word-break: break-word;">
                                             <?php echo $sample_value; ?>
                                         </td>
                                     </tr>
@@ -288,23 +417,25 @@ class WooImpexPro {
                         
                         <p><strong>*</strong> — обов'язкові поля</p>
                         
-                        <input type="hidden" name="update_existing" value="<?php echo isset($_POST['update_existing']) ? '1' : '0'; ?>">
+                        <input type="hidden" name="update_existing" value="<?php echo get_transient('wooimpex_update_existing') === '1' ? '1' : '0'; ?>">
                         
-                        <?php submit_button('🚀 Почати імпорт', 'primary', 'start_import'); ?>
-                        <a href="<?php echo admin_url('admin.php?page=wooimpex&reset=1'); ?>" class="button">
-                            ↺ Завантажити інший файл
-                        </a>
+                        <div class="wooimpex-button-group">
+                            <?php submit_button('🚀 Почати імпорт', 'primary', 'start_import', false); ?>
+                            <a href="<?php echo admin_url('admin.php?page=wooimpex&reset=1'); ?>" class="button">
+                                ↺ Завантажити інший файл
+                            </a>
+                        </div>
                     </form>
                 </div>
                 
-                <!-- Попередній перегляд -->
+                <!-- ПОПЕРЕДНІЙ ПЕРЕГЛЯД -->
                 <div class="wooimpex-preview">
-                    <h3>👁️ Попередній перегляд (3 перших рядки)</h3>
+                    <h3>👁️ Попередній перегляд даних (перші 3 рядки)</h3>
                     <table class="wp-list-table widefat fixed striped">
                         <thead>
                             <tr>
                                 <?php foreach ($csv_headers as $header): ?>
-                                    <th><?php echo esc_html(mb_substr($header, 0, 30)); ?></th>
+                                    <th><?php echo esc_html(mb_substr($header, 0, 25)); ?></th>
                                 <?php endforeach; ?>
                             </tr>
                         </thead>
@@ -312,7 +443,7 @@ class WooImpexPro {
                             <?php for ($i = 1; $i <= min(3, count($csv_data) - 1); $i++): ?>
                                 <tr>
                                     <?php foreach ($csv_data[$i] as $cell): ?>
-                                        <td><?php echo esc_html(mb_substr($cell, 0, 50)); ?></td>
+                                        <td><?php echo esc_html(mb_substr($cell, 0, 60)); ?>比较少
                                     <?php endforeach; ?>
                                 </tr>
                             <?php endfor; ?>
