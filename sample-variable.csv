@@ -1,11 +1,14 @@
-Назва товару,Повний опис,Артикул (SKU),Ціна,Акційна ціна,Кількість,Категорії (через /),Зображення (URL),Галерея (URL через |),Атрибут:Розмір,Атрибут:Колір,Тип запису,Батьківський SKU
-Футболка поло Premium,Якісна бавовняна футболка поло для повсякденного носіння.,POLO-PREMIUM,599,499,100,Одяг/Чоловікам/Футболки,https://example.com/images/polo-main.jpg,https://example.com/images/polo-1.jpg|https://example.com/images/polo-2.jpg,S,M,L,XL,червоний,синій,чорний,parent,
-Футболка поло Premium - S червоний,,POLO-PREMIUM-S-RED,,,15,,,S,червоний,variation,POLO-PREMIUM
-Футболка поло Premium - S синій,,POLO-PREMIUM-S-BLUE,,,15,,,S,синій,variation,POLO-PREMIUM
-Футболка поло Premium - S чорний,,POLO-PREMIUM-S-BLACK,,,15,,,S,чорний,variation,POLO-PREMIUM
-Футболка поло Premium - M червоний,,POLO-PREMIUM-M-RED,,,15,,,M,червоний,variation,POLO-PREMIUM
-Футболка поло Premium - M синій,,POLO-PREMIUM-M-BLUE,,,15,,,M,синій,variation,POLO-PREMIUM
-Футболка поло Premium - M чорний,,POLO-PREMIUM-M-BLACK,,,15,,,M,чорний,variation,POLO-PREMIUM
-Футболка поло Premium - L червоний,,POLO-PREMIUM-L-RED,,,15,,,L,червоний,variation,POLO-PREMIUM
-Футболка поло Premium - L синій,,POLO-PREMIUM-L-BLUE,,,15,,,L,синій,variation,POLO-PREMIUM
-Футболка поло Premium - L чорний,,POLO-PREMIUM-L-BLACK,,,15,,,L,чорний,variation,POLO-PREMIUM
+Назва товару,Повний опис,Артикул (SKU),Ціна,Акційна ціна,Кількість,Категорії (через /),Атрибут:Розмір,Атрибут:Колір,Тип запису,Батьківський SKU,Варіація:Розмір,Варіація:Колір,Ціна варіації,SKU варіації,Зображення (URL)
+"Футболка поло Premium","Якісна бавовняна футболка поло для повсякденного носіння. Доступна в різних розмірах та кольорах.","POLO-PREMIUM",599,,100,"Одяг/Чоловікам/Футболки","S,M,L,XL","червоний,синій,чорний",parent,,,,,,,"https://uaserver.pp.ua/wp-content/uploads/samples/polo-main.jpg"
+,,,,,,,,variation,POLO-PREMIUM,S,червоний,,POLO-PREMIUM-S-RED,"https://uaserver.pp.ua/wp-content/uploads/samples/polo-red.jpg"
+,,,,,,,,variation,POLO-PREMIUM,S,синій,,POLO-PREMIUM-S-BLUE,"https://uaserver.pp.ua/wp-content/uploads/samples/polo-blue.jpg"
+,,,,,,,,variation,POLO-PREMIUM,S,чорний,,POLO-PREMIUM-S-BLACK,"https://uaserver.pp.ua/wp-content/uploads/samples/polo-black.jpg"
+,,,,,,,,variation,POLO-PREMIUM,M,червоний,,POLO-PREMIUM-M-RED,
+,,,,,,,,variation,POLO-PREMIUM,M,синій,,POLO-PREMIUM-M-BLUE,
+,,,,,,,,variation,POLO-PREMIUM,M,чорний,,POLO-PREMIUM-M-BLACK,
+,,,,,,,,variation,POLO-PREMIUM,L,червоний,,POLO-PREMIUM-L-RED,
+,,,,,,,,variation,POLO-PREMIUM,L,синій,,POLO-PREMIUM-L-BLUE,
+,,,,,,,,variation,POLO-PREMIUM,L,чорний,,POLO-PREMIUM-L-BLACK,
+,,,,,,,,variation,POLO-PREMIUM,XL,червоний,,POLO-PREMIUM-XL-RED,
+,,,,,,,,variation,POLO-PREMIUM,XL,синій,,POLO-PREMIUM-XL-BLUE,
+,,,,,,,,variation,POLO-PREMIUM,XL,чорний,,POLO-PREMIUM-XL-BLACK,
