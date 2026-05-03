@@ -1,10 +1,16 @@
 <?php
 /**
- * Plugin Name: WooImpex - Імпорт товарів WooCommerce
- * Description: Імпорт товарів з CSV файлів з автоматичним зіставленням колонок
+ * Plugin Name: WooImpex Pro
+ * Plugin URI: https://uaserver.pp.ua/
+ * Description: Імпорт товарів з CSV для WooCommerce. Підтримка простих та варіативних товарів, зображень, атрибутів.
  * Version: 2.0.1
  * Author: portallcomua
+ * Author URI: https://uaserver.pp.ua/
  * Text Domain: wooimpex
+ * Domain Path: /languages
+ * Requires at least: 5.0
+ * Requires PHP: 7.0
+ * WC requires at least: 4.0
  */
 
 // Запобігаємо прямому доступу
@@ -12,20 +18,29 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// Перевірка наявності WooCommerce
+if (!in_array('woocommerce/woocommerce.php', apply_filters('active_plugins', get_option('active_plugins')))) {
+    add_action('admin_notices', function() {
+        echo '<div class="error"><p><strong>WooImpex Pro</strong> потребує встановленого та активованого плагіну <strong>WooCommerce</strong>.</p></div>';
+    });
+    return;
+}
+
 // Головний клас плагіна
-class WooImpex {
+class WooImpexPro {
     
     private $woo_fields = [];
     
     public function __construct() {
         $this->init_woo_fields();
         add_action('admin_menu', [$this, 'add_admin_menu']);
+        add_action('admin_post_wooimpex_upload_csv', [$this, 'handle_upload']);
         add_action('admin_post_wooimpex_import', [$this, 'handle_import']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_scripts']);
     }
     
     /**
-     * Визначення всіх полів WooCommerce з їхніми мітками
+     * Визначення всіх полів WooCommerce
      */
     private function init_woo_fields() {
         $this->woo_fields = [
@@ -128,7 +143,7 @@ class WooImpex {
     }
     
     /**
-     * Підключення скриптів та стилів
+     * Підключення стилів
      */
     public function enqueue_scripts($hook) {
         if ($hook != 'woocommerce_page_wooimpex') {
@@ -156,36 +171,34 @@ class WooImpex {
     }
     
     /**
-     * Маппінг заголовків CSV до полів WooCommerce
+     * Автоматичне зіставлення колонок
      */
     private function auto_match_columns($csv_headers) {
         $matches = [];
         
-        // Синоніми для пошуку (різні варіанти написання)
         $synonyms = [
-            'post_title' => ['назва', 'назва товару', 'товар', 'заголовок', 'name', 'product name', 'post title', 'title'],
-            'post_content' => ['опис', 'повний опис', 'детальний опис', 'опис товару', 'description', 'full description', 'post content', 'content'],
-            'post_excerpt' => ['короткий опис', 'анонс', 'excerpt', 'short description', 'коротко'],
-            '_sku' => ['артикул', 'sku', 'код', 'код товару', 'article', 'product code', 'код товару'],
-            'regular_price' => ['ціна', 'звичайна ціна', 'ціна товару', 'price', 'regular price', 'cost'],
-            'sale_price' => ['акційна ціна', 'знижка', 'розпродаж', 'sale price', 'special price', 'discount price'],
-            'stock' => ['кількість', 'stock', 'quantity', 'кількість на складі', 'залишок', 'на складі'],
-            'stock_status' => ['статус складу', 'наявність', 'stock status', 'in stock', 'availability'],
-            'weight' => ['вага', 'weight', 'маса', 'вага (кг)'],
-            'length' => ['довжина', 'length', 'довжина (см)'],
-            'width' => ['ширина', 'width', 'ширина (см)'],
-            'height' => ['висота', 'height', 'висота (см)'],
-            'product_cat' => ['категорії', 'категорія', 'категорії (через /)', 'category', 'categories', 'product_cat', 'cat'],
-            'product_tag' => ['теги', 'тег', 'мітки', 'tags', 'product_tag', 'tag'],
-            'image' => ['зображення', 'фото', 'картинка', 'image', 'photo', 'picture', 'url зображення', 'image url', 'main image'],
-            'gallery' => ['галерея', 'додаткові фото', 'gallery', 'images', 'фотогалерея']
+            'post_title' => ['назва', 'назва товару', 'товар', 'заголовок', 'name', 'product name'],
+            'post_content' => ['опис', 'повний опис', 'детальний опис', 'description', 'content'],
+            'post_excerpt' => ['короткий опис', 'анонс', 'excerpt', 'short description'],
+            '_sku' => ['артикул', 'sku', 'код', 'article', 'product code'],
+            'regular_price' => ['ціна', 'звичайна ціна', 'price', 'regular price'],
+            'sale_price' => ['акційна ціна', 'знижка', 'sale price', 'special price'],
+            'stock' => ['кількість', 'stock', 'quantity', 'залишок'],
+            'stock_status' => ['статус складу', 'наявність', 'stock status', 'availability'],
+            'weight' => ['вага', 'weight', 'маса'],
+            'length' => ['довжина', 'length'],
+            'width' => ['ширина', 'width'],
+            'height' => ['висота', 'height'],
+            'product_cat' => ['категорії', 'категорія', 'category', 'categories', 'cat'],
+            'product_tag' => ['теги', 'тег', 'мітки', 'tags', 'tag'],
+            'image' => ['зображення', 'фото', 'картинка', 'image', 'photo', 'picture'],
+            'gallery' => ['галерея', 'додаткові фото', 'gallery', 'images']
         ];
         
         foreach ($csv_headers as $header) {
             $clean_header = trim(mb_strtolower($header, 'UTF-8'));
             $matched = false;
             
-            // Спроба знайти точний збіг з лейблами полів
             foreach ($this->woo_fields as $field_key => $field_info) {
                 if (mb_strtolower($header, 'UTF-8') === mb_strtolower($field_info['label'], 'UTF-8')) {
                     $matches[$header] = $field_key;
@@ -194,7 +207,6 @@ class WooImpex {
                 }
             }
             
-            // Якщо точного збігу немає, шукаємо за синонімами
             if (!$matched) {
                 foreach ($synonyms as $field_key => $synonym_list) {
                     foreach ($synonym_list as $synonym) {
@@ -207,7 +219,6 @@ class WooImpex {
                 }
             }
             
-            // Якщо нічого не знайшли - залишаємо порожнім
             if (!$matched) {
                 $matches[$header] = '';
             }
@@ -220,14 +231,13 @@ class WooImpex {
      * Рендер сторінки імпорту
      */
     public function render_admin_page() {
-        // Перевіряємо, чи був завантажений CSV
         $csv_data = get_transient('wooimpex_csv_data');
         $csv_headers = get_transient('wooimpex_csv_headers');
         $auto_matches = $csv_headers ? $this->auto_match_columns($csv_headers) : [];
         
         ?>
         <div class="wrap">
-            <h1>WooImpex - Імпорт товарів</h1>
+            <h1>WooImpex Pro - Імпорт товарів</h1>
             
             <?php if (isset($_GET['imported']) && $_GET['imported'] > 0): ?>
                 <div class="notice notice-success">
@@ -236,9 +246,8 @@ class WooImpex {
             <?php endif; ?>
             
             <?php if (!$csv_data): ?>
-                <!-- Форма завантаження CSV -->
                 <div class="card">
-                    <h2>Крок 1: Завантажте CSV файл</h2>
+                    <h2>📂 Крок 1: Завантажте CSV файл</h2>
                     <form method="post" enctype="multipart/form-data" action="<?php echo admin_url('admin-post.php'); ?>">
                         <input type="hidden" name="action" value="wooimpex_upload_csv">
                         <?php wp_nonce_field('wooimpex_upload', 'wooimpex_nonce'); ?>
@@ -249,17 +258,25 @@ class WooImpex {
                         <p>
                             <label>
                                 <input type="checkbox" name="update_existing" value="1">
-                                Оновити існуючі товари (за SKU)
+                                🔄 Оновити існуючі товари (за SKU)
                             </label>
                         </p>
                         <?php submit_button('Завантажити CSV', 'primary', 'upload_csv'); ?>
                     </form>
                 </div>
-            <?php else: ?>
-                <!-- Форма зіставлення колонок -->
+                
                 <div class="card">
-                    <h2>Крок 2: Зіставте колонки CSV з полями товару</h2>
-                    <p>Плагін автоматично підібрав відповідності. Ви можете змінити їх вручну.</p>
+                    <h3>📄 Приклади CSV файлів</h3>
+                    <p>У папці плагіна ви знайдете файли-приклади:</p>
+                    <ul>
+                        <li><code>sample-products.csv</code> — звичайний товар</li>
+                        <li><code>sample-variable.csv</code> — варіативний товар</li>
+                    </ul>
+                </div>
+            <?php else: ?>
+                <div class="card">
+                    <h2>🔧 Крок 2: Зіставте колонки CSV з полями товару</h2>
+                    <p>✅ Плагін автоматично підібрав відповідності. Ви можете змінити їх вручну.</p>
                     
                     <form method="post" action="<?php echo admin_url('admin-post.php'); ?>">
                         <input type="hidden" name="action" value="wooimpex_import">
@@ -268,7 +285,7 @@ class WooImpex {
                         <table class="wooimpex-mapping-table">
                             <thead>
                                 <tr>
-                                    <th width="30%">Колонка CSV (приклад даних)</th>
+                                    <th width="30%">Колонка CSV</th>
                                     <th width="35%">Поле WooCommerce</th>
                                     <th width="35%">Приклад значення</th>
                                 </tr>
@@ -294,7 +311,7 @@ class WooImpex {
                                                     </option>
                                                 <?php endforeach; ?>
                                             </select>
-                                        </td>
+                                        <td>
                                         <td style="color: #666; font-size: 12px;">
                                             <?php echo $sample_value; ?>
                                         </td>
@@ -303,27 +320,24 @@ class WooImpex {
                             </tbody>
                         </table>
                         
-                        <p>
-                            <strong>*</strong> — обов'язкові поля
-                        </p>
+                        <p><strong>*</strong> — обов'язкові поля</p>
                         
                         <input type="hidden" name="update_existing" value="<?php echo isset($_POST['update_existing']) ? '1' : '0'; ?>">
                         
-                        <?php submit_button('Почати імпорт', 'primary', 'start_import'); ?>
+                        <?php submit_button('🚀 Почати імпорт', 'primary', 'start_import'); ?>
                         <a href="<?php echo admin_url('admin.php?page=wooimpex&reset=1'); ?>" class="button">
-                            Завантажити інший файл
+                            ↺ Завантажити інший файл
                         </a>
                     </form>
                 </div>
                 
-                <!-- Попередній перегляд даних -->
                 <div class="wooimpex-preview">
-                    <h3>Попередній перегляд даних (3 перших рядки)</h3>
+                    <h3>👁️ Попередній перегляд (3 перших рядки)</h3>
                     <table class="wp-list-table widefat fixed striped">
                         <thead>
                             <tr>
                                 <?php foreach ($csv_headers as $header): ?>
-                                    <th><?php echo esc_html($header); ?></th>
+                                    <th><?php echo esc_html(mb_substr($header, 0, 30)); ?></th>
                                 <?php endforeach; ?>
                             </tr>
                         </thead>
@@ -361,12 +375,12 @@ class WooImpex {
         $csv_data = $this->parse_csv($file);
         
         if (empty($csv_data)) {
-            wp_die('Невдалося прочитати CSV файл');
+            wp_die('Не вдалося прочитати CSV файл');
         }
         
-        // Зберігаємо дані в транзієнт на 1 годину
         set_transient('wooimpex_csv_data', $csv_data, HOUR_IN_SECONDS);
         set_transient('wooimpex_csv_headers', $csv_data[0], HOUR_IN_SECONDS);
+        set_transient('wooimpex_update_existing', isset($_POST['update_existing']) ? '1' : '0', HOUR_IN_SECONDS);
         
         wp_redirect(admin_url('admin.php?page=wooimpex'));
         exit;
@@ -379,7 +393,6 @@ class WooImpex {
         $data = [];
         if (($handle = fopen($file, 'r')) !== false) {
             while (($row = fgetcsv($handle, 0, ',')) !== false) {
-                // Видаляємо BOM з першого рядка
                 if (empty($data)) {
                     $row[0] = $this->remove_bom($row[0]);
                 }
@@ -391,7 +404,7 @@ class WooImpex {
     }
     
     /**
-     * Видалення BOM з рядка
+     * Видалення BOM
      */
     private function remove_bom($text) {
         $bom = pack('H*','EFBBBF');
@@ -411,13 +424,13 @@ class WooImpex {
         
         $csv_data = get_transient('wooimpex_csv_data');
         $mapping = $_POST['mapping'];
-        $update_existing = isset($_POST['update_existing']) ? true : false;
+        $update_existing = get_transient('wooimpex_update_existing') === '1';
         
         if (empty($csv_data)) {
             wp_die('Дані CSV не знайдено. Будь ласка, завантажте файл знову.');
         }
         
-        $headers = array_shift($csv_data); // Видаляємо заголовки
+        $headers = array_shift($csv_data);
         $imported = 0;
         $errors = [];
         
@@ -430,12 +443,11 @@ class WooImpex {
                     continue;
                 }
                 
-                $value = $row[$col_index];
+                $value = trim($row[$col_index]);
                 if (empty($value) && $field_key !== 'stock_status') {
                     continue;
                 }
                 
-                // Перевіряємо, чи це мета-поле
                 $is_meta = isset($this->woo_fields[$field_key]['meta_key']) && $this->woo_fields[$field_key]['meta_key'];
                 
                 if ($is_meta) {
@@ -445,7 +457,6 @@ class WooImpex {
                 }
             }
             
-            // Перевіряємо наявність обов'язкових полів
             if (empty($product_data['post_title'])) {
                 $errors[] = "Рядок " . ($row_index + 2) . ": відсутня назва товару";
                 continue;
@@ -456,7 +467,6 @@ class WooImpex {
                 continue;
             }
             
-            // Створюємо або оновлюємо товар
             $product_id = $this->save_product($product_data, $meta_data, $update_existing);
             
             if ($product_id) {
@@ -466,11 +476,10 @@ class WooImpex {
             }
         }
         
-        // Очищаємо транзієнти
         delete_transient('wooimpex_csv_data');
         delete_transient('wooimpex_csv_headers');
+        delete_transient('wooimpex_update_existing');
         
-        // Редирект з результатами
         $redirect_url = admin_url('admin.php?page=wooimpex&imported=' . $imported);
         if (!empty($errors)) {
             $redirect_url .= '&errors=' . urlencode(implode('|', $errors));
@@ -486,7 +495,6 @@ class WooImpex {
     private function save_product($product_data, $meta_data, $update_existing = false) {
         $existing_product_id = null;
         
-        // Шукаємо існуючий товар за SKU
         if ($update_existing && !empty($meta_data['_sku'])) {
             $existing_product_id = wc_get_product_id_by_sku($meta_data['_sku']);
         }
@@ -516,10 +524,8 @@ class WooImpex {
             return false;
         }
         
-        // Встановлюємо тип товару (простий)
         wp_set_object_terms($product_id, 'simple', 'product_type');
         
-        // Зберігаємо мета-дані
         foreach ($meta_data as $meta_key => $meta_value) {
             if ($meta_key === '_sku') {
                 update_post_meta($product_id, '_sku', $meta_value);
@@ -539,7 +545,6 @@ class WooImpex {
             }
         }
         
-        // Обробка категорій
         if (!empty($product_data['product_cat'])) {
             $categories = explode('/', $product_data['product_cat']);
             $term_ids = [];
@@ -564,14 +569,12 @@ class WooImpex {
             }
         }
         
-        // Обробка тегів
         if (!empty($product_data['product_tag'])) {
             $tags = explode(',', $product_data['product_tag']);
             $tags = array_map('trim', $tags);
             wp_set_object_terms($product_id, $tags, 'product_tag');
         }
         
-        // Обробка зображення
         if (!empty($product_data['image'])) {
             $image_id = $this->upload_image_from_url($product_data['image'], $product_id);
             if ($image_id) {
@@ -579,7 +582,6 @@ class WooImpex {
             }
         }
         
-        // Обробка галереї
         if (!empty($product_data['gallery'])) {
             $image_urls = explode('|', $product_data['gallery']);
             $gallery_ids = [];
@@ -610,13 +612,11 @@ class WooImpex {
             return false;
         }
         
-        // Перевіряємо, чи зображення вже завантажене
         $attachment_id = attachment_url_to_postid($url);
         if ($attachment_id) {
             return $attachment_id;
         }
         
-        // Завантажуємо зображення
         require_once(ABSPATH . 'wp-admin/includes/media.php');
         require_once(ABSPATH . 'wp-admin/includes/file.php');
         require_once(ABSPATH . 'wp-admin/includes/image.php');
@@ -632,22 +632,17 @@ class WooImpex {
 }
 
 // Ініціалізація плагіна
-function wooimpex_init() {
-    new WooImpex();
+function wooimpex_pro_init() {
+    new WooImpexPro();
 }
-add_action('plugins_loaded', 'wooimpex_init');
+add_action('plugins_loaded', 'wooimpex_pro_init');
 
-// Обробка upload через admin-post
-add_action('admin_post_wooimpex_upload_csv', function() {
-    $plugin = new WooImpex();
-    $plugin->handle_upload();
-});
-
-// Обробка скидання даних
+// Скидання даних
 add_action('admin_init', function() {
     if (isset($_GET['page']) && $_GET['page'] === 'wooimpex' && isset($_GET['reset'])) {
         delete_transient('wooimpex_csv_data');
         delete_transient('wooimpex_csv_headers');
+        delete_transient('wooimpex_update_existing');
         wp_redirect(admin_url('admin.php?page=wooimpex'));
         exit;
     }
