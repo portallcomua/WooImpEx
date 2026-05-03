@@ -41,7 +41,6 @@ class WooImpexPro {
     
     /**
      * Визначення всіх полів WooCommerce
-     * Клієнт повинен використовувати ТОЧНО ТАКІ НАЗВИ колонок у CSV
      */
     private function init_woo_fields() {
         $this->woo_fields = [
@@ -130,30 +129,6 @@ class WooImpexPro {
     }
     
     /**
-     * Автоматичне зіставлення колонок (ТІЛЬКИ за точним збігом)
-     * Клієнт повинен використовувати назви колонок ТОЧНО як у прикладі
-     */
-    private function auto_match_columns($csv_headers) {
-        $matches = [];
-        
-        foreach ($csv_headers as $header) {
-            $found = false;
-            foreach ($this->woo_fields as $field_key => $field_info) {
-                if ($header === $field_info['label']) {
-                    $matches[$header] = $field_key;
-                    $found = true;
-                    break;
-                }
-            }
-            if (!$found) {
-                $matches[$header] = '';
-            }
-        }
-        
-        return $matches;
-    }
-    
-    /**
      * Додавання сторінки в адмінку
      */
     public function add_admin_menu() {
@@ -196,6 +171,29 @@ class WooImpexPro {
     }
     
     /**
+     * Автоматичне зіставлення колонок
+     */
+    private function auto_match_columns($csv_headers) {
+        $matches = [];
+        
+        foreach ($csv_headers as $header) {
+            $found = false;
+            foreach ($this->woo_fields as $field_key => $field_info) {
+                if ($header === $field_info['label']) {
+                    $matches[$header] = $field_key;
+                    $found = true;
+                    break;
+                }
+            }
+            if (!$found) {
+                $matches[$header] = '';
+            }
+        }
+        
+        return $matches;
+    }
+    
+    /**
      * Рендер сторінки імпорту
      */
     public function render_admin_page() {
@@ -213,16 +211,8 @@ class WooImpexPro {
                 </div>
             <?php endif; ?>
             
-            <div class="card">
-                <h3>📋 Правильні назви колонок у CSV файлі</h3>
-                <p>Ваш CSV файл <strong>ПОВИНЕН</strong> мати саме такі назви колонок:</p>
-                <code style="display: block; background: #f1f1f1; padding: 10px; margin: 10px 0; white-space: pre-wrap;">
-Назва товару, Повний опис, Короткий опис, Артикул (SKU), Ціна, Акційна ціна, Кількість, Статус складу, Вага (кг), Довжина (см), Ширина (см), Висота (см), Категорії (через /), Теги (через ,), Зображення (URL), Галерея (URL через |)
-                </code>
-                <p><strong>⚠️ Важливо:</strong> назви колонок мають бути <strong>точно такими</strong> як у прикладі, включаючи пробіли та розділові знаки.</p>
-            </div>
-            
             <?php if (!$csv_data): ?>
+                <!-- Форма завантаження CSV -->
                 <div class="card">
                     <h2>📂 Крок 1: Завантажте CSV файл</h2>
                     <form method="post" enctype="multipart/form-data" action="<?php echo admin_url('admin-post.php'); ?>">
@@ -243,17 +233,16 @@ class WooImpexPro {
                 </div>
                 
                 <div class="card">
-                    <h3>📄 Приклади CSV файлів</h3>
-                    <p>У папці плагіна ви знайдете файли-приклади:</p>
-                    <ul>
-                        <li><code>sample-products.csv</code> — приклад простого товару з усіма полями</li>
-                        <li><code>sample-variable.csv</code> — приклад варіативного товару</li>
-                    </ul>
+                    <h3>📄 Правильні назви колонок у CSV:</h3>
+                    <code style="display: block; background: #f1f1f1; padding: 10px;">
+Назва товару, Повний опис, Короткий опис, Артикул (SKU), Ціна, Акційна ціна, Кількість, Статус складу, Вага (кг), Довжина (см), Ширина (см), Висота (см), Категорії (через /), Теги (через ,), Зображення (URL), Галерея (URL через |)
+                    </code>
                 </div>
             <?php else: ?>
+                <!-- Форма зіставлення колонок -->
                 <div class="card">
                     <h2>🔧 Крок 2: Зіставте колонки CSV з полями товару</h2>
-                    <p>✅ Плагін автоматично підібрав відповідності за назвами колонок. Перевірте та натисніть "Почати імпорт".</p>
+                    <p>✅ Плагін автоматично підібрав відповідності за назвами колонок.</p>
                     
                     <form method="post" action="<?php echo admin_url('admin-post.php'); ?>">
                         <input type="hidden" name="action" value="wooimpex_import">
@@ -263,8 +252,8 @@ class WooImpexPro {
                             <thead>
                                 <tr>
                                     <th width="30%">Колонка CSV</th>
-                                    <th width="35%">Поле WooCommerce</th>
-                                    <th width="35%">Приклад значення</th>
+                                    <th width="40%">Поле WooCommerce</th>
+                                    <th width="30%">Приклад значення</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -308,6 +297,7 @@ class WooImpexPro {
                     </form>
                 </div>
                 
+                <!-- Попередній перегляд -->
                 <div class="wooimpex-preview">
                     <h3>👁️ Попередній перегляд (3 перших рядки)</h3>
                     <table class="wp-list-table widefat fixed striped">
@@ -364,7 +354,7 @@ class WooImpexPro {
     }
     
     /**
-     * Парсинг CSV файлу
+     * Парсинг CSV
      */
     private function parse_csv($file) {
         $data = [];
@@ -522,6 +512,7 @@ class WooImpexPro {
             }
         }
         
+        // Категорії
         if (!empty($product_data['product_cat'])) {
             $categories = explode('/', $product_data['product_cat']);
             $term_ids = [];
@@ -546,12 +537,14 @@ class WooImpexPro {
             }
         }
         
+        // Теги
         if (!empty($product_data['product_tag'])) {
             $tags = explode(',', $product_data['product_tag']);
             $tags = array_map('trim', $tags);
             wp_set_object_terms($product_id, $tags, 'product_tag');
         }
         
+        // Зображення
         if (!empty($product_data['image'])) {
             $image_id = $this->upload_image_from_url($product_data['image'], $product_id);
             if ($image_id) {
@@ -559,6 +552,7 @@ class WooImpexPro {
             }
         }
         
+        // Галерея
         if (!empty($product_data['gallery'])) {
             $image_urls = explode('|', $product_data['gallery']);
             $gallery_ids = [];
@@ -608,7 +602,7 @@ class WooImpexPro {
     }
 }
 
-// Ініціалізація плагіна
+// Ініціалізація
 function wooimpex_pro_init() {
     new WooImpexPro();
 }
