@@ -1,9 +1,14 @@
-Назва товару,Артикул (SKU),Ціна,Акційна ціна,Категорії (через /),Атрибути (назва:значення1,значення2),Варіації (кожна нова строка)
-Футболка поло,POLO-BASE,499,,Одяг/Чоловікам/Футболки,Розмір:S,M,L,XL,Базова футболка
-Футболка поло - S,POLO-BASE-S,499,,,,Розмір:S,
-Футболка поло - M,POLO-BASE-M,499,,,,Розмір:M,
-Футболка поло - L,POLO-BASE-L,499,,,,Розмір:L,
-Футболка поло - XL,POLO-BASE-XL,499,,,,Розмір:XL,
-Кросівки бігові,SHOE-RUN,1299,999,Спорт/Взуття/Бігові,"Розмір:39,40,41,42,43|Колір:чорний,білий,синій",Базові кросівки
-Кросівки бігові - 39/чорний,SHOE-RUN-39-BLACK,1299,999,,,Розмір:39,Колір:чорний
-Кросівки бігові - 39/білий,SHOE-RUN-39-WHITE,1299,999,,,Розмір:39,Колір:білий
+Назва товару,Повний опис,Короткий опис,Артикул (SKU),Ціна,Акційна ціна,Кількість,Статус складу,Вага (кг),Категорії (через /),Атрибути (назва:значення1,значення2),Тип запису,Батьківський SKU,Варіація (атрибут:значення)
+Футболка поло Premium,Якісна бавовняна футболка поло для повсякденного носіння. Доступна в різних розмірах та кольорах.,Поло Premium - комфорт та стиль,POLO-PREMIUM,599,499,100,instock,0.3,Одяг/Чоловікам/Футболки,Розмір:S,M,L,XL|Колір:червоний,синій,чорний,parent,,
+Футболка поло Premium - S/червоний,,,POLO-PREMIUM-S-RED,,,15,instock,0.3,,,variation,POLO-PREMIUM,Розмір:S,Колір:червоний
+Футболка поло Premium - S/синій,,,POLO-PREMIUM-S-BLUE,,,15,instock,0.3,,,variation,POLO-PREMIUM,Розмір:S,Колір:синій
+Футболка поло Premium - S/чорний,,,POLO-PREMIUM-S-BLACK,,,15,instock,0.3,,,variation,POLO-PREMIUM,Розмір:S,Колір:чорний
+Футболка поло Premium - M/червоний,,,POLO-PREMIUM-M-RED,,,15,instock,0.3,,,variation,POLO-PREMIUM,Розмір:M,Колір:червоний
+Футболка поло Premium - M/синій,,,POLO-PREMIUM-M-BLUE,,,15,instock,0.3,,,variation,POLO-PREMIUM,Розмір:M,Колір:синій
+Футболка поло Premium - M/чорний,,,POLO-PREMIUM-M-BLACK,,,15,instock,0.3,,,variation,POLO-PREMIUM,Розмір:M,Колір:чорний
+Футболка поло Premium - L/червоний,,,POLO-PREMIUM-L-RED,,,15,instock,0.3,,,variation,POLO-PREMIUM,Розмір:L,Колір:червоний
+Футболка поло Premium - L/синій,,,POLO-PREMIUM-L-BLUE,,,15,instock,0.3,,,variation,POLO-PREMIUM,Розмір:L,Колір:синій
+Футболка поло Premium - L/чорний,,,POLO-PREMIUM-L-BLACK,,,15,instock,0.3,,,variation,POLO-PREMIUM,Розмір:L,Колір:чорний
+Футболка поло Premium - XL/червоний,,,POLO-PREMIUM-XL-RED,,,10,instock,0.3,,,variation,POLO-PREMIUM,Розмір:XL,Колір:червоний
+Футболка поло Premium - XL/синій,,,POLO-PREMIUM-XL-BLUE,,,10,instock,0.3,,,variation,POLO-PREMIUM,Розмір:XL,Колір:синій
+Футболка поло Premium - XL/чорний,,,POLO-PREMIUM-XL-BLACK,,,10,instock,0.3,,,variation,POLO-PREMIUM,Розмір:XL,Колір:чорний
