@@ -1,0 +1,531 @@
+name: AI Issue Worker
+
+'on':
+  issues:
+    types: [opened, edited]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "Command: audit, setup, release"
+        required: true
+        default: "audit"
+      release_version:
+        description: "Release version, for example 1.0.0"
+        required: false
+        default: "1.0.0"
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  ai-worker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Detect command
+        id: cmd
+        run: |
+          COMMAND="audit"
+          RELEASE_VERSION="${{ github.event.inputs.release_version }}"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            COMMAND="${{ github.event.inputs.command }}"
+          elif [ "${{ github.event_name }}" = "issues" ]; then
+            cat > /tmp/task.txt <<'EOF'
+${{ github.event.issue.title }}
+
+${{ github.event.issue.body }}
+EOF
+          elif [ "${{ github.event_name }}" = "issue_comment" ]; then
+            cat > /tmp/task.txt <<'EOF'
+${{ github.event.comment.body }}
+EOF
+          fi
+
+          if [ -f /tmp/task.txt ]; then
+            if grep -qi "/setup-plugin" /tmp/task.txt; then COMMAND="setup"; fi
+            if grep -qi "/audit-plugin" /tmp/task.txt; then COMMAND="audit"; fi
+            if grep -qi "/release" /tmp/task.txt; then COMMAND="release"; fi
+            RV=$(grep -Eio "Release-Version:[[:space:]]*[0-9A-Za-z._-]+" /tmp/task.txt | head -1 | sed -E 's/Release-Version:[[:space:]]*//I')
+            if [ -n "$RV" ]; then RELEASE_VERSION="$RV"; fi
+          fi
+
+          echo "command=$COMMAND" >> "$GITHUB_OUTPUT"
+          echo "release_version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Command: $COMMAND"
+          echo "Release version: $RELEASE_VERSION"
+
+      - name: Audit and optionally setup plugin
+        run: |
+          COMMAND="${{ steps.cmd.outputs.command }}"
+          RELEASE_VERSION="${{ steps.cmd.outputs.release_version }}"
+
+          python3 - <<'PY'
+import os
+import re
+import shutil
+import zipfile
+from pathlib import Path
+from datetime import datetime
+
+command = os.environ.get("COMMAND", "${{ steps.cmd.outputs.command }}")
+release_version = os.environ.get("RELEASE_VERSION", "${{ steps.cmd.outputs.release_version }}")
+root = Path(".").resolve()
+old = root / "old_version"
+old.mkdir(exist_ok=True)
+
+def is_ignored(path: Path) -> bool:
+    parts = set(path.parts)
+    return ".git" in parts or "node_modules" in parts or "vendor" in parts
+
+def read_text_safe(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return ""
+
+def parse_header(text: str):
+    name = ""
+    version = ""
+    author = ""
+    for line in text.splitlines()[:120]:
+        m = re.search(r"Plugin Name:\s*(.+)", line, re.I)
+        if m:
+            name = m.group(1).strip(" */\t")
+        m = re.search(r"Version:\s*([0-9A-Za-z._-]+)", line, re.I)
+        if m and not version:
+            version = m.group(1).strip()
+        m = re.search(r"Author:\s*(.+)", line, re.I)
+        if m and not author:
+            author = m.group(1).strip(" */\t")
+    return name, version, author
+
+def version_key(v: str):
+    nums = re.findall(r"\d+", v or "0")
+    return tuple(int(x) for x in nums[:5]) if nums else (0,)
+
+def slugify(value: str):
+    value = value.lower()
+    value = re.sub(r"[^a-z0-9_-]+", "-", value)
+    value = re.sub(r"-+", "-", value).strip("-")
+    return value or "wordpress-plugin"
+
+candidates = []
+
+for path in root.rglob("*"):
+    if not path.is_file() or is_ignored(path):
+        continue
+
+    rel = path.relative_to(root).as_posix()
+
+    if path.suffix.lower() in [".php", ".bak", ".txt"]:
+        text = read_text_safe(path)
+        if "Plugin Name:" in text:
+            name, version, author = parse_header(text)
+            candidates.append({
+                "type": path.suffix.lower().lstrip("."),
+                "path": rel,
+                "plugin_name": name,
+                "version": version,
+                "author": author,
+                "size": path.stat().st_size,
+                "file_count": 1,
+                "main_file": rel,
+                "zip_main": "",
+                "score_path": str(path)
+            })
+
+    if path.suffix.lower() == ".zip":
+        try:
+            with zipfile.ZipFile(path, "r") as z:
+                infos = [i for i in z.infolist() if not i.is_dir()]
+                for info in infos:
+                    if info.filename.lower().endswith((".php", ".txt", ".bak")):
+                        try:
+                            data = z.read(info.filename).decode("utf-8", errors="ignore")
+                        except Exception:
+                            continue
+                        if "Plugin Name:" in data:
+                            name, version, author = parse_header(data)
+                            candidates.append({
+                                "type": "zip",
+                                "path": rel,
+                                "plugin_name": name,
+                                "version": version,
+                                "author": author,
+                                "size": path.stat().st_size,
+                                "file_count": len(infos),
+                                "main_file": info.filename,
+                                "zip_main": info.filename,
+                                "score_path": str(path)
+                            })
+                            break
+        except Exception:
+            pass
+
+def candidate_score(c):
+    return (
+        version_key(c["version"]),
+        int(c["file_count"]),
+        int(c["size"]),
+        1 if c["type"] == "zip" else 0
+    )
+
+selected = sorted(candidates, key=candidate_score, reverse=True)[0] if candidates else None
+
+now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+status = []
+status.append("# Project Status")
+status.append("")
+status.append(f"Repository audit date: {now}")
+status.append("")
+status.append("## Detected candidates")
+status.append("")
+status.append("| Source | Type | Plugin Name | Version | Size | Files | Main file | Result |")
+status.append("|---|---|---|---:|---:|---:|---|---|")
+
+for c in candidates:
+    result = "SELECTED" if selected and c == selected else "Candidate"
+    status.append(f"| `{c['path']}` | {c['type']} | {c['plugin_name']} | {c['version']} | {c['size']} | {c['file_count']} | `{c['main_file']}` | {result} |")
+
+if not selected:
+    status.append("")
+    status.append("## Result")
+    status.append("")
+    status.append("No valid WordPress plugin source was detected. Manual review required.")
+
+Path("PROJECT_STATUS.md").write_text("\n".join(status) + "\n", encoding="utf-8")
+
+if command not in ["setup", "release"]:
+    print("Audit only. PROJECT_STATUS.md created.")
+    raise SystemExit(0)
+
+if not selected:
+    raise SystemExit("No valid plugin source found. Cannot continue setup.")
+
+plugin_file_name = Path(selected["main_file"]).name
+plugin_slug = slugify(Path(plugin_file_name).stem)
+active_dir = root / plugin_slug
+active_main = active_dir / f"{plugin_slug}.php"
+
+backup_stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+old.mkdir(exist_ok=True)
+
+if active_dir.exists():
+    backup_dir = old / f"{plugin_slug}-before-setup-{backup_stamp}"
+    if not backup_dir.exists():
+        shutil.copytree(active_dir, backup_dir)
+    shutil.rmtree(active_dir)
+
+active_dir.mkdir(parents=True, exist_ok=True)
+
+if selected["type"] == "zip":
+    zip_path = root / selected["path"]
+    temp = root / ".tmp_ai_extract"
+    if temp.exists():
+        shutil.rmtree(temp)
+    temp.mkdir()
+
+    with zipfile.ZipFile(zip_path, "r") as z:
+        z.extractall(temp)
+
+    main_inside = temp / selected["zip_main"]
+    source_dir = main_inside.parent
+
+    for item in source_dir.iterdir():
+        dest = active_dir / item.name
+        if item.is_dir():
+            shutil.copytree(item, dest, dirs_exist_ok=True)
+        else:
+            shutil.copy2(item, dest)
+
+    shutil.rmtree(temp)
+
+else:
+    source_file = root / selected["path"]
+    shutil.copy2(source_file, active_main)
+
+if not active_main.exists():
+    possible = list(active_dir.rglob("*.php"))
+    for p in possible:
+        text = read_text_safe(p)
+        if "Plugin Name:" in text:
+            p.rename(active_main)
+            break
+
+for d in ["admin", "includes", "public", "assets", "templates", "languages"]:
+    (active_dir / d).mkdir(exist_ok=True)
+
+if not (active_dir / "uninstall.php").exists():
+    (active_dir / "uninstall.php").write_text("<?php\nif (!defined('WP_UNINSTALL_PLUGIN')) { exit; }\n", encoding="utf-8")
+
+if active_main.exists():
+    s = read_text_safe(active_main)
+    s = re.sub(r"(Version:\s*)[0-9A-Za-z._-]+", r"\g<1>" + (selected["version"] or "1.0.0"), s, count=1)
+    active_main.write_text(s, encoding="utf-8")
+
+def move_to_old(path: Path):
+    if not path.exists() or is_ignored(path):
+        return
+    try:
+        rel = path.relative_to(root)
+    except Exception:
+        return
+    if str(rel).startswith("old_version/") or str(rel).startswith(f"{plugin_slug}/") or str(rel).startswith(".github/"):
+        return
+    target = old / rel.name
+    if target.exists():
+        target = old / f"{backup_stamp}-{rel.name}"
+    shutil.move(str(path), str(target))
+
+for path in list(root.rglob("*")):
+    if not path.is_file():
+        continue
+    if path.suffix.lower() == ".zip":
+        move_to_old(path)
+    elif path.suffix.lower() in [".bak", ".tmp"]:
+        move_to_old(path)
+    elif path.suffix.lower() == ".txt" and "Plugin Name:" in read_text_safe(path):
+        move_to_old(path)
+    elif path.suffix.lower() == ".php" and "Plugin Name:" in read_text_safe(path):
+        try:
+            rel = path.relative_to(root).as_posix()
+        except Exception:
+            continue
+        if not rel.startswith(f"{plugin_slug}/"):
+            move_to_old(path)
+
+Path("README.md").write_text(f"""# {selected['plugin_name'] or plugin_slug}
+
+WordPress plugin repository.
+
+## Active source
+
+`{plugin_slug}/`
+
+## Main plugin file
+
+`{plugin_slug}/{plugin_slug}.php`
+
+## Selected source
+
+`{selected['path']}`
+
+See `PROJECT_STATUS.md` before making changes.
+""", encoding="utf-8")
+
+Path("CHANGELOG.md").write_text(f"""# Changelog
+
+## Setup
+
+- Repository structure standardized.
+- Active source selected: `{selected['path']}`.
+- Active plugin folder: `{plugin_slug}/`.
+""", encoding="utf-8")
+
+Path("AI_RULES.md").write_text(f"""# AI Rules
+
+Active source folder: `{plugin_slug}/`
+
+Main plugin file: `{plugin_slug}/{plugin_slug}.php`
+
+Release ZIP name: `{plugin_slug}.zip`
+
+Rules:
+- Edit only active source folder unless explicitly asked.
+- Never edit old_version as active code.
+- Never delete archives permanently.
+- Move backups and old ZIP files to old_version.
+- Always update README.md after meaningful changes.
+- Always update CHANGELOG.md after meaningful changes.
+- Always update PROJECT_STATUS.md after structural changes.
+- Do not rewrite plugin from scratch unless explicitly requested.
+""", encoding="utf-8")
+
+Path("TODO.md").write_text("""# TODO
+
+- Test plugin activation.
+- Test main admin page.
+- Test frontend/public features.
+- Test release ZIP.
+- Test WordPress update process if updater exists.
+""", encoding="utf-8")
+
+if not Path("LICENSE").exists():
+    Path("LICENSE").write_text("GPL-2.0-or-later\n", encoding="utf-8")
+
+Path(".gitignore").write_text(""".DS_Store
+Thumbs.db
+*.log
+*.tmp
+node_modules/
+vendor/
+build/
+dist/
+*.zip
+!old_version/*.zip
+.tmp_ai_extract/
+""", encoding="utf-8")
+
+status.append("")
+status.append("## Selected source")
+status.append("")
+status.append(f"- Selected: `{selected['path']}`")
+status.append(f"- Plugin Name: {selected['plugin_name']}")
+status.append(f"- Version: {selected['version']}")
+status.append(f"- Active source folder: `{plugin_slug}/`")
+status.append(f"- Main plugin file: `{plugin_slug}/{plugin_slug}.php`")
+status.append("")
+status.append("## Setup result")
+status.append("")
+status.append("- Repository structure standardized.")
+status.append("- Old archives/backups moved to old_version where possible.")
+status.append("- Documentation files created/updated.")
+status.append("- Release workflow created/updated.")
+
+Path("PROJECT_STATUS.md").write_text("\n".join(status) + "\n", encoding="utf-8")
+
+print(f"Selected source: {selected['path']}")
+print(f"Plugin slug: {plugin_slug}")
+PY
+
+      - name: Create universal release workflow
+        if: steps.cmd.outputs.command == 'setup'
+        run: |
+          mkdir -p .github/workflows
+
+          cat > .github/workflows/release.yml <<'EOF'
+name: Plugin Release
+
+'on':
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: "Release version"
+        required: true
+        default: "1.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect plugin folder
+        id: detect
+        run: |
+          PLUGIN_FILE=$(grep -RIl "Plugin Name:" . --include="*.php" --exclude-dir=".git" --exclude-dir="old_version" --exclude-dir=".github" | head -1)
+
+          if [ -z "$PLUGIN_FILE" ]; then
+            echo "No plugin file found"
+            exit 1
+          fi
+
+          PLUGIN_DIR=$(dirname "$PLUGIN_FILE")
+          ZIP_NAME="$(basename "$PLUGIN_DIR").zip"
+
+          echo "plugin_dir=$PLUGIN_DIR" >> "$GITHUB_OUTPUT"
+          echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Build ZIP
+        run: |
+          PLUGIN_DIR="${{ steps.detect.outputs.plugin_dir }}"
+          ZIP_NAME="${{ steps.detect.outputs.zip_name }}"
+
+          rm -rf build "$ZIP_NAME"
+          mkdir -p build
+          cp -R "$PLUGIN_DIR" "build/$PLUGIN_DIR"
+
+          cd build
+          zip -r "../$ZIP_NAME" "$PLUGIN_DIR" \
+            -x "$PLUGIN_DIR/.git/*" \
+            -x "$PLUGIN_DIR/old_version/*" \
+            -x "$PLUGIN_DIR/docs/*" \
+            -x "$PLUGIN_DIR/*.bak" \
+            -x "$PLUGIN_DIR/*.tmp"
+          cd ..
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ github.event.inputs.release_version }}"
+          ZIP_NAME="${{ steps.detect.outputs.zip_name }}"
+
+          gh release view "$VERSION" >/dev/null 2>&1 && gh release delete "$VERSION" -y --cleanup-tag || true
+
+          gh release create "$VERSION" "$ZIP_NAME" \
+            --title "Release $VERSION" \
+            --notes "Automated plugin release $VERSION"
+EOF
+
+      - name: Build release ZIP from active plugin folder
+        if: steps.cmd.outputs.command == 'release'
+        run: |
+          RELEASE_VERSION="${{ steps.cmd.outputs.release_version }}"
+          PLUGIN_FILE=$(grep -RIl "Plugin Name:" . --include="*.php" --exclude-dir=".git" --exclude-dir="old_version" --exclude-dir=".github" | head -1)
+
+          if [ -z "$PLUGIN_FILE" ]; then
+            echo "No plugin file found"
+            exit 1
+          fi
+
+          PLUGIN_DIR=$(dirname "$PLUGIN_FILE")
+          ZIP_NAME="$(basename "$PLUGIN_DIR").zip"
+
+          rm -rf build "$ZIP_NAME"
+          mkdir -p build
+          cp -R "$PLUGIN_DIR" "build/$PLUGIN_DIR"
+
+          cd build
+          zip -r "../$ZIP_NAME" "$PLUGIN_DIR"
+          cd ..
+
+          echo "$ZIP_NAME" > /tmp/zip_name.txt
+
+      - name: Create GitHub Release
+        if: steps.cmd.outputs.command == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASE_VERSION="${{ steps.cmd.outputs.release_version }}"
+          ZIP_NAME=$(cat /tmp/zip_name.txt)
+
+          gh release view "$RELEASE_VERSION" >/dev/null 2>&1 && gh release delete "$RELEASE_VERSION" -y --cleanup-tag || true
+
+          gh release create "$RELEASE_VERSION" "$ZIP_NAME" \
+            --title "Release $RELEASE_VERSION" \
+            --notes "Automated plugin release $RELEASE_VERSION"
+
+      - name: Commit changes
+        if: steps.cmd.outputs.command == 'audit' || steps.cmd.outputs.command == 'setup'
+        run: |
+          git add -A
+          git commit -m "chore: run AI repository worker" || echo "No changes to commit"
+          git push || echo "Nothing to push"
+
+      - name: Comment result
+        if: github.event_name == 'issues' || github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COMMAND="${{ steps.cmd.outputs.command }}"
+          gh issue comment "${{ github.event.issue.number }}" --body "✅ AI Issue Worker completed command: $COMMAND. Check PROJECT_STATUS.md for details."
